@@ -1,0 +1,45 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: bot-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    ports:
+      - "27017:27017"
+
+  redis:
+    image: redis:7-alpine
+    container_name: bot-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+
+  bot:
+    build: .
+    container_name: bot-app
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MONGO_URI=mongodb://root:example@mongo:27017/bot?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - WEBHOOK_PATH=${WEBHOOK_PATH:-/tg-webhook}
+      - SERVER_PORT=${SERVER_PORT:-3000}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - TARGET_CHAT_ID=${TARGET_CHAT_ID}
+      - CHANNEL_INVITE_LINK=${CHANNEL_INVITE_LINK}
+    ports:
+      - "3000:3000"
+
+volumes:
+  mongo-data:
+  redis-data:
