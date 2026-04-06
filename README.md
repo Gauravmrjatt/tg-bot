@@ -7,7 +7,7 @@ A Telegram bot written in TypeScript (Telegraf + Express) with webhook support, 
 - **Join Request Approval** — User requests to join a private channel, admins get Approve/Decline inline buttons. Redis-backed for instant response.
 - **Auto-Approve Mode** — Admin toggles via `/autoapprove`. When ON, join requests are approved automatically (still logged for audit).
 - **Broadcast with Delivery Tracking** — Send messages to all users with delivered/failed/blocked counters. Check status anytime with `/bcast <id>`.
-- **Admin Relay** — Users DM the bot, message forwards to all admins. User gets confirmation. Admin replies with `/reply <userId> <message>`.
+- **Admin Relay** — Users DM the bot, message forwards to all admins. User gets confirmation. Admin replies by directly replying to the forwarded message in Telegram (or use `/reply <userId> <message>`).
 - **Stats Dashboard** — `/stats` shows user count, join request history, and broadcast delivery rates.
 - **User Tracking** — Every interacting user is persisted in MongoDB automatically.
 
@@ -37,14 +37,23 @@ BOT_TOKEN=your-bot-token-from-botfather
 MONGO_URI=mongodb://localhost:27017/bot
 WEBHOOK_URL=https://your-domain.com
 ADMIN_IDS=123456,789012
-TARGET_CHAT_ID=-100xxxxxxxxx
 
 # Optional
 REDIS_URL=redis://localhost:6379
 SERVER_PORT=3000
 WEBHOOK_PATH=/tg-webhook
-CHANNEL_INVITE_LINK=https://t.me/+yourinvitelink
+LOG_LEVEL=info
 ```
+
+### 3. Runtime Configuration
+
+After the bot starts, configure these with admin commands (stored in DB + Redis):
+
+| Command | Description |
+|---------|-------------|
+| `/setchannelid -100xxxxxxxxx` | Set the private channel chat ID |
+| `/setchannellink https://...` | Set the invite link for `/rejoin` |
+| `/config` | View current config |
 
 ### 3. Run with Docker
 
@@ -87,6 +96,14 @@ npm run dev
 | `/bcast <id>` | Check delivery status of a broadcast |
 | `/stats` | View bot statistics |
 | `/reply <userId> <message>` | Reply to a user who messaged the bot |
+| `/setchannelid <id>` | Set the private channel chat ID |
+| `/setchannellink <url>` | Set the invite link for `/rejoin` |
+| `/config` | View current runtime configuration |
+
+### Admin Inline Actions
+
+- **Join requests**: Approve/Decline buttons sent to admins
+- **User DMs**: Admins can reply directly to the forwarded message in Telegram (no command needed)
 
 ### Admin Inline Actions
 
