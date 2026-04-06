@@ -1,8 +1,14 @@
 import { Context, Telegraf } from "telegraf";
-import pLimit from "p-limit";
 import { BroadcastModel, UserModel } from "../models/index.js";
 
-const limit = pLimit(50); // up to 50 concurrent Telegram API requests
+// Build batches of `size` items for concurrent processing
+function chunk<T>(arr: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
 
 export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
   bot.command("broadcast", async (ctx) => {
@@ -11,9 +17,9 @@ export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (!text) return ctx.reply("Usage: /broadcast <message>");
 
     const broadcastId = `bc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const bc = await BroadcastModel.create({ messageId: broadcastId, text });
+    await BroadcastModel.create({ messageId: broadcastId, text });
 
-    const users = await UserModel.find({}, { tgId: 1, username: 1 }).lean();
+    const users = await UserModel.find({}, { tgId: 1 }).lean();
     if (users.length === 0) return ctx.reply("No users to broadcast to.");
 
     await BroadcastModel.updateOne({ messageId: broadcastId }, { totalTargeted: users.length });
@@ -23,35 +29,42 @@ export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
     let failed = 0;
     let blocked = 0;
 
-    // Process in batches of 50 concurrently
-    const tasks = users.map((user) =>
-      limit(async () => {
-        try {
-          await bot.telegram.sendMessage(user.tgId, text);
-          delivered++;
-        } catch (err: any) {
-          const errMsg = err.response?.description || err.message || "";
-          const lower = errMsg.toLowerCase();
-          if (lower.includes("blocked") || lower.includes("deactivated") || lower.includes("forbidden")) {
-            blocked++;
-          } else {
-            failed++;
-          }
-        }
-      })
-    );
-
-    // Update progress every 100 messages
-    let updateInterval = setInterval(async () => {
+    // Send in batches of 50 concurrently (avoids Telegram rate limits)
+    const batches = chunk(users, 50);
+    const updateInterval = setInterval(async () => {
       await BroadcastModel.updateOne(
         { messageId: broadcastId },
         { $set: { delivered, failed: failed + blocked } }
       );
     }, 2000);
 
-    await Promise.all(tasks);
-    clearInterval(updateInterval);
+    for (const batch of batches) {
+      const results = await Promise.allSettled(
+        batch.map(async (user) => {
+          try {
+            await bot.telegram.sendMessage(user.tgId, text);
+            return "delivered" as const;
+          } catch (err: any) {
+            const lower = (err.response?.description || err.message || "").toLowerCase();
+            if (lower.includes("blocked") || lower.includes("deactivated") || lower.includes("forbidden")) {
+              return "blocked" as const;
+            }
+            return "failed" as const;
+          }
+        })
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          if (r.value === "delivered") delivered++;
+          else if (r.value === "blocked") blocked++;
+          else failed++;
+        } else {
+          failed++; // should not happen but safety net
+        }
+      }
+    }
 
+    clearInterval(updateInterval);
     await BroadcastModel.updateOne(
       { messageId: broadcastId },
       { $set: { delivered, failed: failed + blocked, status: "completed" } }
