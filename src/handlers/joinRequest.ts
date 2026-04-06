@@ -1,14 +1,14 @@
 import { Context, Markup, Telegraf } from "telegraf";
 import { UserModel, JoinRequestModel, GlobalSettingsModel } from "../models/index.js";
 import { getAutoApprove, setAutoApprove, cachePendingRequest, getPendingRequest, removePendingRequest } from "../utils/redis.js";
+import { getTargetChatId } from "../utils/settings.js";
 
-export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], targetChatId: number) {
+export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) {
   // Admin only — toggle global auto-approve (default OFF)
   bot.command("autoapprove", async (ctx) => {
-    if (!adminIds.includes(ctx.from.id)) return ctx.reply("Admin only.");
+    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
     const current = await getAutoApprove();
     await setAutoApprove(!current);
-    // Persist to DB too
     const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
     if (setting) {
       setting.value = !current;
@@ -23,19 +23,21 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
     const joinReq = ctx.chatJoinRequest!;
     const user = joinReq.from;
     const globalAuto = await getAutoApprove();
+    const targetChatId = await getTargetChatId();
 
-    // Upsert user record for tracking
-    await UserModel.findOneAndUpdate(
+    await UserModel.updateOne(
       { tgId: user.id },
       {
-        tgId: user.id,
-        firstName: user.first_name,
-        lastName: user.last_name,
-        username: user.username,
-        isAdmin: adminIds.includes(user.id),
-        lastActiveAt: new Date(),
+        $set: {
+          tgId: user.id,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          username: user.username,
+          isAdmin: adminSet.has(user.id),
+          lastActiveAt: new Date(),
+        },
       },
-      { upsert: true, setDefaultsOnInsert: true },
+      { upsert: true },
     );
 
     const name = `${user.first_name}${user.last_name ? " " + user.last_name : ""}${user.username ? " (@" + user.username + ")" : ""}`;
@@ -44,7 +46,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
       try {
         await bot.telegram.approveChatJoinRequest(joinReq.chat.id, user.id);
         await JoinRequestModel.create({
-          chatId: joinReq.chat.id,
+          chatId: targetChatId ?? joinReq.chat.id,
           userId: user.id,
           firstName: user.first_name,
           lastName: user.last_name,
@@ -54,7 +56,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
           status: "approved",
           actionAt: new Date(),
         });
-        for (const adminId of adminIds) {
+        for (const adminId of adminSet) {
           try {
             await bot.telegram.sendMessage(adminId, `Auto-approved join request from ${name}`);
           } catch {
@@ -65,7 +67,6 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
         console.error("Auto-approve failed:", err);
       }
     } else {
-      // Cache in Redis for instant approve/decline lookups
       await cachePendingRequest(user.id, {
         chatId: joinReq.chat.id,
         userId: user.id,
@@ -78,13 +79,13 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
         Markup.button.callback("Approve", `approve:${user.id}`),
         Markup.button.callback("Decline", `decline:${user.id}`),
       ]);
-      for (const adminId of adminIds) {
+      for (const adminId of adminSet) {
         try {
           const msg = await bot.telegram.sendMessage(adminId, `Join request from ${name}\nChat ID: ${joinReq.chat.id}`, {
             reply_markup: kb.reply_markup,
           });
           await JoinRequestModel.create({
-            chatId: joinReq.chat.id,
+            chatId: targetChatId ?? joinReq.chat.id,
             userId: user.id,
             firstName: user.first_name,
             lastName: user.last_name,
@@ -105,12 +106,10 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
   bot.action(/^approve:(\d+)$/, async (ctx) => {
     const userId = parseInt(ctx.match[1]!, 10);
     const cbUser = ctx.callbackQuery.from!;
-    if (!adminIds.includes(cbUser.id)) return ctx.answerCbQuery("Not authorized.");
+    if (!adminSet.has(cbUser.id)) return ctx.answerCbQuery("Not authorized.");
 
-    // Fast path: Redis cache
     const cached = await getPendingRequest(userId);
     if (!cached) {
-      // Fallback: DB
       const req = await JoinRequestModel.findOneAndUpdate(
         { userId, status: "pending" },
         { $set: { status: "approved", approvedBy: cbUser.id, actionAt: new Date() } },
@@ -126,7 +125,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
     }
 
     await removePendingRequest(userId);
-    await JoinRequestModel.updateOne({ userId }, { $set: { status: "pending", actionAt: new Date() } });
+    await JoinRequestModel.updateOne({ userId }, { $set: { status: "approved", approvedBy: cbUser.id, actionAt: new Date() } });
     try {
       await bot.telegram.approveChatJoinRequest(cached.chatId as number, userId);
       await ctx.editMessageText(`Approved join request from ${cached.firstName}`);
@@ -139,7 +138,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
   bot.action(/^decline:(\d+)$/, async (ctx) => {
     const userId = parseInt(ctx.match[1]!, 10);
     const cbUser = ctx.callbackQuery.from!;
-    if (!adminIds.includes(cbUser.id)) return ctx.answerCbQuery("Not authorized.");
+    if (!adminSet.has(cbUser.id)) return ctx.answerCbQuery("Not authorized.");
 
     const cached = await getPendingRequest(userId);
     if (!cached) {
@@ -157,7 +156,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
       }
     }
 
-    removePendingRequest(userId);
+    await removePendingRequest(userId);
     await JoinRequestModel.updateOne({ userId }, { $set: { status: "declined", approvedBy: cbUser.id, actionAt: new Date() } });
     try {
       await bot.telegram.declineChatJoinRequest(cached.chatId as number, userId);

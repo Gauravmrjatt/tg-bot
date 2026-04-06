@@ -37,3 +37,21 @@ export async function getPendingRequest(userId: number): Promise<Record<string, 
 export async function removePendingRequest(userId: number) {
   await redis.del(`joinreq:${userId}`);
 }
+
+export async function getSetting(key: string): Promise<string | null> {
+  return redis.get(`setting:${key}`);
+}
+
+export async function setSetting(key: string, value: string) {
+  await redis.set(`setting:${key}`, value);
+}
+
+// Cache the original user_id -> forwardedMessage mapping for reply-by-reply
+export async function cacheForwardedId(forwardMsgId: number, userId: number) {
+  await redis.set(`fwd:${forwardMsgId}`, String(userId), "EX", 86400); // 24h
+}
+
+export async function getForwardedUser(forwardMsgId: number): Promise<number | null> {
+  const v = await redis.get(`fwd:${forwardMsgId}`);
+  return v ? parseInt(v, 10) : null;
+}

@@ -1,9 +1,9 @@
 import { Context, Telegraf } from "telegraf";
 import { UserModel, JoinRequestModel, BroadcastModel } from "../models/index.js";
 
-export function setupStats(bot: Telegraf<Context>, adminIds: number[]) {
+export function setupStats(bot: Telegraf<Context>, adminSet: Set<number>) {
   bot.command("stats", async (ctx) => {
-    if (!adminIds.includes(ctx.from.id)) return ctx.reply("Admin only.");
+    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
 
     const totalUsers = await UserModel.countDocuments();
     const pendingRequests = await JoinRequestModel.countDocuments({ status: "pending" });

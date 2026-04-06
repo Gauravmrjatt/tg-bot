@@ -4,12 +4,13 @@ import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import pino from "pino";
 import { connectDb } from "./utils/db.js";
-import { connectRedis } from "./utils/redis.js";
-import { UserModel } from "./models/index.js";
+import { connectRedis, getSetting } from "./utils/redis.js";
+import { UserModel, GlobalSettingsModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupBroadcast } from "./handlers/broadcast.js";
 import { setupStats } from "./handlers/stats.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
+import { getTargetChatId, setTargetChatId, setChannelLink } from "./utils/settings.js";
 
 dotenv.config();
 
@@ -35,10 +36,6 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || "")
   .filter(Boolean)
   .map(Number);
 
-const TARGET_CHAT_ID = parseInt(process.env.TARGET_CHAT_ID || "0", 10);
-if (!TARGET_CHAT_ID) throw new Error("TARGET_CHAT_ID not set");
-
-// Admin set as a lookup for O(1) checks
 const AdminSet = new Set(ADMIN_IDS);
 
 const bot = new Telegraf<Context>(TOKEN);
@@ -76,16 +73,43 @@ bot.start((ctx) => ctx.reply("Hey, I'm alive!"));
 bot.help((ctx) => ctx.reply("Available commands:\n/rejoin — Get the channel invite link"));
 
 bot.command("rejoin", async (ctx) => {
-  const inviteLink = process.env.CHANNEL_INVITE_LINK;
+  const inviteLink = await getSetting("channel_link");
   if (!inviteLink) return ctx.reply("Invite link is not configured.");
   return ctx.reply(`Here's the invite link: ${inviteLink}`);
 });
 
+// --- Runtime config commands (admin only) ---
+
+bot.command("setchannelid", async (ctx) => {
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  const text = ctx.message.text.slice("/setchannelid".length).trim();
+  if (!text) return ctx.reply("Usage: /setchannelid <chat_id>");
+  const chatId = parseInt(text, 10);
+  if (isNaN(chatId)) return ctx.reply("Invalid chat ID.");
+  await setTargetChatId(chatId);
+  return ctx.reply(`Target chat ID set to: ${chatId}`);
+});
+
+bot.command("setchannellink", async (ctx) => {
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  const text = ctx.message.text.slice("/setchannellink".length).trim();
+  if (!text) return ctx.reply("Usage: /setchannellink <invite_link>");
+  await setChannelLink(text);
+  return ctx.reply("Channel invite link set.");
+});
+
+bot.command("config", async (ctx) => {
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  const chatId = await getTargetChatId();
+  const link = await getSetting("channel_link");
+  return ctx.reply(`Current config:\nTarget Chat ID: ${chatId ?? "(not set)"}\nChannel Link: ${link ?? "(not set)"}`);
+});
+
 // Setup feature handlers
-setupJoinRequest(bot, ADMIN_IDS, TARGET_CHAT_ID);
+setupJoinRequest(bot, AdminSet);
 setupBroadcast(bot, AdminSet);
-setupStats(bot, ADMIN_IDS);
-setupAdminRelay(bot, ADMIN_IDS);
+setupStats(bot, AdminSet);
+setupAdminRelay(bot, AdminSet);
 
 // --- Express server with rate limiting and webhook validation ---
 async function main() {
@@ -97,8 +121,8 @@ async function main() {
 
   const app = express();
 
-  app.use(rateLimit({ windowMs: 60_000, max: 1000, message: { error: "Too many requests" } }));
-
+  // app.use(rateLimit({ windowMs: 60_000, max: 1000, message: { error: "Too many requests" } }));
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "50mb" }));
 
   app.post(WEBHOOK_PATH, (req: Request, res: Response) => {
