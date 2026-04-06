@@ -6,7 +6,6 @@ export function setupStats(bot: Telegraf<Context>, adminIds: number[]) {
     if (!adminIds.includes(ctx.from.id)) return ctx.reply("Admin only.");
 
     const totalUsers = await UserModel.countDocuments();
-    const autoApproveUsers = await UserModel.countDocuments({ autoApprove: true });
     const pendingRequests = await JoinRequestModel.countDocuments({ status: "pending" });
     const totalApproved = await JoinRequestModel.countDocuments({ status: "approved" });
     const totalDeclined = await JoinRequestModel.countDocuments({ status: "declined" });
@@ -15,11 +14,7 @@ export function setupStats(bot: Telegraf<Context>, adminIds: number[]) {
       .sort({ sentAt: -1 })
       .limit(5);
 
-    let msg = `📊 Bot Stats\n\n`;
-    msg += `Users: ${totalUsers}\n`;
-    msg += `  Auto-approve enabled: ${autoApproveUsers}\n`;
-    msg += `Join Requests: ${totalApproved} approved, ${totalDeclined} declined, ${pendingRequests} pending\n`;
-    msg += `Broadcasts: ${broadcasts}\n`;
+    let msg = `Bot Stats\n\nUsers: ${totalUsers}\nJoin Requests: ${totalApproved} approved, ${totalDeclined} declined, ${pendingRequests} pending\nBroadcasts: ${broadcasts}\n`;
 
     if (recentBroadcasts.length > 0) {
       msg += `\nRecent broadcasts:\n`;

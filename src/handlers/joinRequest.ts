@@ -125,8 +125,8 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminIds: number[], tar
       }
     }
 
-    removePendingRequest(userId);
-    await JoinRequestModel.updateOne({ userId }, { $set: { status: "approved", approvedBy: cbUser.id, actionAt: new Date() } });
+    await removePendingRequest(userId);
+    await JoinRequestModel.updateOne({ userId }, { $set: { status: "pending", actionAt: new Date() } });
     try {
       await bot.telegram.approveChatJoinRequest(cached.chatId as number, userId);
       await ctx.editMessageText(`Approved join request from ${cached.firstName}`);
