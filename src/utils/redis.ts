@@ -46,8 +46,23 @@ export async function setSetting(key: string, value: string) {
 }
 
 export async function getAdminIds(): Promise<number[]> {
-  const raw = await redis.smembers("setting:admin_ids");
-  return raw.map(Number);
+  // Try reading as set first
+  try {
+    const raw = await redis.smembers("setting:admin_ids");
+    return raw.map(Number);
+  } catch (err: any) {
+    // If WRONGTYPE, the key is still a string from old code — migrate it
+    if (err.message?.includes("WRONGTYPE")) {
+      const raw = await redis.get("setting:admin_ids");
+      const ids: number[] = raw ? JSON.parse(raw) : [];
+      if (ids.length > 0) {
+        await redis.del("setting:admin_ids");
+        await redis.sadd("setting:admin_ids", ...ids.map(String));
+      }
+      return ids;
+    }
+    throw err;
+  }
 }
 
 export async function addAdminId(id: number) {

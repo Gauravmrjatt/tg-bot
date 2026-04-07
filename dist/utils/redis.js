@@ -57,8 +57,24 @@ async function setSetting(key, value) {
     await exports.redis.set(`setting:${key}`, value); // No TTL — settings persist indefinitely
 }
 async function getAdminIds() {
-    const raw = await exports.redis.smembers("setting:admin_ids");
-    return raw.map(Number);
+    // Try reading as set first
+    try {
+        const raw = await exports.redis.smembers("setting:admin_ids");
+        return raw.map(Number);
+    }
+    catch (err) {
+        // If WRONGTYPE, the key is still a string from old code — migrate it
+        if (err.message?.includes("WRONGTYPE")) {
+            const raw = await exports.redis.get("setting:admin_ids");
+            const ids = raw ? JSON.parse(raw) : [];
+            if (ids.length > 0) {
+                await exports.redis.del("setting:admin_ids");
+                await exports.redis.sadd("setting:admin_ids", ...ids.map(String));
+            }
+            return ids;
+        }
+        throw err;
+    }
 }
 async function addAdminId(id) {
     await exports.redis.sadd("setting:admin_ids", String(id));
