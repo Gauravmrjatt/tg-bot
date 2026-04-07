@@ -12,8 +12,7 @@ export async function connectRedis(url: string) {
   console.log("Redis connected");
 }
 
-// Cache helpers
-const CACHE_TTL = 300; // 5 min
+const SETTING_TTL = 3600; // 1h
 
 export async function getAutoApprove(): Promise<boolean> {
   const cached = await redis.get("setting:auto_approve");
@@ -22,11 +21,11 @@ export async function getAutoApprove(): Promise<boolean> {
 }
 
 export async function setAutoApprove(value: boolean): Promise<void> {
-  await redis.set("setting:auto_approve", value ? "1" : "0", "EX", CACHE_TTL);
+  await redis.set("setting:auto_approve", value ? "1" : "0", "EX", SETTING_TTL);
 }
 
 export async function cachePendingRequest(userId: number, data: Record<string, unknown>) {
-  await redis.set(`joinreq:${userId}`, JSON.stringify(data), "EX", 3600); // expire after 1h
+  await redis.set(`joinreq:${userId}`, JSON.stringify(data), "EX", 3600);
 }
 
 export async function getPendingRequest(userId: number): Promise<Record<string, unknown> | null> {
@@ -38,17 +37,17 @@ export async function removePendingRequest(userId: number) {
   await redis.del(`joinreq:${userId}`);
 }
 
+// Settings always cached with TTL
 export async function getSetting(key: string): Promise<string | null> {
   return redis.get(`setting:${key}`);
 }
 
 export async function setSetting(key: string, value: string) {
-  await redis.set(`setting:${key}`, value);
+  await redis.set(`setting:${key}`, value, "EX", SETTING_TTL);
 }
 
-// Cache the original user_id -> forwardedMessage mapping for reply-by-reply
 export async function cacheForwardedId(forwardMsgId: number, userId: number) {
-  await redis.set(`fwd:${forwardMsgId}`, String(userId), "EX", 86400); // 24h
+  await redis.set(`fwd:${forwardMsgId}`, String(userId), "EX", 86400);
 }
 
 export async function getForwardedUser(forwardMsgId: number): Promise<number | null> {
@@ -64,11 +63,10 @@ export async function getAdminIds(): Promise<number[]> {
 export async function addAdminId(id: number) {
   const ids = await getAdminIds();
   if (!ids.includes(id)) ids.push(id);
-  await redis.set("setting:admin_ids", JSON.stringify(ids));
+  await redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
 }
 
 export async function removeAdminId(id: number) {
   const ids = await getAdminIds().then(list => list.filter(x => x !== id));
-  await redis.set("setting:admin_ids", JSON.stringify(ids));
+  await redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
 }
-

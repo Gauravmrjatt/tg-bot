@@ -1,92 +1,166 @@
 import { Context, Telegraf } from "telegraf";
 import { BroadcastModel, UserModel } from "../models/index.js";
 
-// Build batches of `size` items for concurrent processing
-function chunk<T>(arr: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
+const BATCH_SIZE = 30; // Telegram rate limit: ~30 msg/sec
+const BATCH_DELAY_MS = 1500; // wait between batches to avoid flooding
+const CONCURRENT = 10; // max concurrent sends within a batch
+
+// Process an array with limited concurrency
+async function processConcurrent<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let idx = 0;
+
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      results[i] = await fn(items[i]);
+    }
   }
-  return result;
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
+}
+
+// Telegram API helper: respects 429 rate limits
+async function sendMessageWithRetry(
+  bot: Telegraf<Context>,
+  userId: number,
+  text: string,
+  maxRetries = 2,
+): Promise<"delivered" | "failed" | "blocked"> {
+  let retries = 0;
+
+  while (true) {
+    try {
+      await bot.telegram.sendMessage(userId, text);
+      return "delivered";
+    } catch (err: any) {
+      const desc = err.response?.description || err.message || "";
+      const lower = desc.toLowerCase();
+
+      // Handle 429 rate limiting
+      if (lower.includes("too many requests") || lower.includes("429")) {
+        const match = desc.match(/retry after[: ]+(\d+)/i);
+        const retryAfter = match ? parseInt(match[1], 10) : 5;
+        const delay = Math.min(retryAfter * 1000, 30000);
+
+        if (retries < maxRetries) {
+          retries++;
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        // Max retries hit — count as failed
+        return "failed";
+      }
+
+      if (lower.includes("blocked") || lower.includes("deactivated") || lower.includes("forbidden")) {
+        return "blocked";
+      }
+      return "failed";
+    }
+  }
 }
 
 export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
+  // In-progress broadcast tracker
+  let activeBroadcast: { broadcastId: string; delivered: number; failed: number; blocked: number } | null = null;
+
   bot.command("broadcast", async (ctx) => {
-    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
     const text = ctx.message.text.slice("/broadcast".length).trim();
-    if (!text) return ctx.reply("Usage: /broadcast <message>");
+    if (!text) return ctx.reply("Usage: `/broadcast <message>`", { parse_mode: "Markdown" });
+
+    if (activeBroadcast) {
+      return ctx.reply("⚠ _A broadcast is already in progress. Wait for it to finish._", { parse_mode: "Markdown" });
+    }
 
     const broadcastId = `bc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     await BroadcastModel.create({ messageId: broadcastId, text });
 
-    const users = await UserModel.find({}, { tgId: 1 }).lean();
-    if (users.length === 0) return ctx.reply("📢 _No users to broadcast to._", { parse_mode: "Markdown" });
+    const totalUsers = await UserModel.countDocuments();
+    if (totalUsers === 0) return ctx.reply("📢 _No users to broadcast to._", { parse_mode: "Markdown" });
 
-    await BroadcastModel.updateOne({ messageId: broadcastId }, { totalTargeted: users.length });
-    await ctx.reply(`📢 *Broadcasting* to ${users.length} users...\n\n🆔 ID: \`${broadcastId}\``, { parse_mode: "Markdown" });
+    await BroadcastModel.updateOne({ messageId: broadcastId }, { totalTargeted: totalUsers });
 
-    let delivered = 0;
-    let failed = 0;
-    let blocked = 0;
+    activeBroadcast = { broadcastId, delivered: 0, failed: 0, blocked: 0 };
 
-    // Send in batches of 50 concurrently (avoids Telegram rate limits)
-    const batches = chunk(users, 50);
-    const updateInterval = setInterval(async () => {
-      await BroadcastModel.updateOne(
-        { messageId: broadcastId },
-        { $set: { delivered, failed: failed + blocked } }
+    await ctx.reply(`📢 *Broadcasting* to ${totalUsers} users...\n\n🆔 ID: \`${broadcastId}\``, { parse_mode: "Markdown" });
+
+    // Cursor-based pagination — never loads all users into memory
+    let processed = 0;
+    let lastId: string | undefined;
+
+    while (processed < totalUsers) {
+      const query = lastId ? { _id: { $gt: lastId } } : {};
+      const users = await UserModel.find(query, { tgId: 1 })
+        .sort({ _id: 1 })
+        .limit(BATCH_SIZE)
+        .lean();
+
+      if (users.length === 0) break;
+      lastId = String(users[users.length - 1]._id);
+
+      const results = await processConcurrent(
+        users,
+        CONCURRENT,
+        async (user) => {
+          return sendMessageWithRetry(bot, user.tgId, text);
+        },
       );
-    }, 2000);
 
-    for (const batch of batches) {
-      const results = await Promise.allSettled(
-        batch.map(async (user) => {
-          try {
-            await bot.telegram.sendMessage(user.tgId, text);
-            return "delivered" as const;
-          } catch (err: any) {
-            const lower = (err.response?.description || err.message || "").toLowerCase();
-            if (lower.includes("blocked") || lower.includes("deactivated") || lower.includes("forbidden")) {
-              return "blocked" as const;
-            }
-            return "failed" as const;
-          }
-        })
-      );
       for (const r of results) {
-        if (r.status === "fulfilled") {
-          if (r.value === "delivered") delivered++;
-          else if (r.value === "blocked") blocked++;
-          else failed++;
-        } else {
-          failed++; // should not happen but safety net
-        }
+        if (r === "delivered") activeBroadcast.delivered++;
+        else if (r === "blocked") activeBroadcast.blocked++;
+        else activeBroadcast.failed++;
+      }
+
+      processed += users.length;
+
+      // Progress update every few batches
+      if (processed % 200 === 0 || processed >= totalUsers) {
+        await BroadcastModel.updateOne(
+          { messageId: broadcastId },
+          { $set: { delivered: activeBroadcast.delivered, failed: activeBroadcast.failed + activeBroadcast.blocked } },
+        );
+      }
+
+      // Delay between batches to respect Telegram rate limits
+      if (processed < totalUsers) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
       }
     }
 
-    clearInterval(updateInterval);
+    const { delivered, failed, blocked } = activeBroadcast;
     await BroadcastModel.updateOne(
       { messageId: broadcastId },
-      { $set: { delivered, failed: failed + blocked, status: "completed" } }
+      { $set: { delivered, failed: failed + blocked, status: "completed" } },
     );
+    activeBroadcast = null;
 
     return ctx.reply(
-      `📢 *Broadcast Complete*\n\n🟢 Delivered: *${delivered}*\n🔴 Failed: *${failed}*\n🚫 Blocked: *${blocked}*\n📊 Total: *${users.length}*`,
-      { parse_mode: "Markdown" }
+      `📢 *Broadcast Complete*\n\n🟢 Delivered: *${delivered}*\n🔴 Failed: *${failed}*\n🚫 Blocked: *${blocked}*\n📊 Total: *${totalUsers}*`,
+      { parse_mode: "Markdown" },
     );
   });
 
   bot.command("bcast", async (ctx) => {
-    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
     const id = ctx.message.text.slice("/bcast".length).trim();
-    if (!id) return ctx.reply("Usage: /bcast <broadcastId>");
+    if (!id) return ctx.reply("Usage: `/bcast <id>`", { parse_mode: "Markdown" });
 
     const bc = await BroadcastModel.findOne({ messageId: id }).lean();
     if (!bc) return ctx.reply("Broadcast not found.");
 
-    return ctx.reply(
-      `Broadcast \`${bc.messageId}\` (${bc.status})\nSent: ${bc.sentAt.toISOString()}\nDelivered: ${bc.delivered}/${bc.totalTargeted}\nFailed: ${bc.failed}`,
-      { parse_mode: "Markdown" }
-    );
+    let msg = `📢 *Broadcast* \`${bc.messageId}\`\n`;
+    msg += `*Status:* _${bc.status}_\n`;
+    msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
+    msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
+    return ctx.reply(msg, { parse_mode: "Markdown" });
   });
 }
