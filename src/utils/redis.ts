@@ -37,22 +37,12 @@ export async function removePendingRequest(userId: number) {
   await redis.del(`joinreq:${userId}`);
 }
 
-// Settings always cached with TTL
 export async function getSetting(key: string): Promise<string | null> {
   return redis.get(`setting:${key}`);
 }
 
 export async function setSetting(key: string, value: string) {
   await redis.set(`setting:${key}`, value, "EX", SETTING_TTL);
-}
-
-export async function cacheForwardedId(forwardMsgId: number, userId: number) {
-  await redis.set(`fwd:${forwardMsgId}`, String(userId), "EX", 86400);
-}
-
-export async function getForwardedUser(forwardMsgId: number): Promise<number | null> {
-  const v = await redis.get(`fwd:${forwardMsgId}`);
-  return v ? parseInt(v, 10) : null;
 }
 
 export async function getAdminIds(): Promise<number[]> {
@@ -69,4 +59,31 @@ export async function addAdminId(id: number) {
 export async function removeAdminId(id: number) {
   const ids = await getAdminIds().then(list => list.filter(x => x !== id));
   await redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
+}
+
+// --- Conversational state ---
+// Tracks per-user state for interactive flows: action="add_admin" | "remove_admin" | "set_channel" | "set_link"
+export type AdminState = { action: string; adminChatId?: number; adminMsgId?: number; data?: any };
+
+export async function getAdminState(userId: number): Promise<AdminState | null> {
+  const data = await redis.get(`adminstate:${userId}`);
+  return data ? JSON.parse(data) : null;
+}
+
+export async function setAdminState(userId: number, state: AdminState) {
+  await redis.set(`adminstate:${userId}`, JSON.stringify(state), "EX", 300); // 5 min
+}
+
+export async function clearAdminState(userId: number) {
+  await redis.del(`adminstate:${userId}`);
+}
+
+// --- Admin reply mapping — stores forwarded msg ID for EACH admin ---
+export async function mapForwardedId(adminChatId: number, adminMsgId: number, userId: number) {
+  await redis.set(`fwd:${adminChatId}:${adminMsgId}`, String(userId), "EX", 86400);
+}
+
+export async function getForwardedAdminUser(adminChatId: number, adminMsgId: number): Promise<number | null> {
+  const v = await redis.get(`fwd:${adminChatId}:${adminMsgId}`);
+  return v ? parseInt(v, 10) : null;
 }

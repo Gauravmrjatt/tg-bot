@@ -28,12 +28,10 @@ export const JoinRequestSchema = new mongoose.Schema({
   adminChatId: { type: Number },
   requestedAt: { type: Date, default: Date.now },
   actionAt: Date,
-}, {
-  indexes: [
-    { fields: { status: 1 } },       // countDocuments({ status })
-    { fields: { userId: 1, status: 1 } }, // findOneAndUpdate({ userId, status })
-  ],
 });
+
+JoinRequestSchema.index({ status: 1 });
+JoinRequestSchema.index({ userId: 1, status: 1 });
 
 export const JoinRequestModel =
   mongoose.models.JoinRequest ||

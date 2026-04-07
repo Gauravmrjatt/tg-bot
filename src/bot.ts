@@ -7,11 +7,8 @@ import { connectDb } from "./utils/db.js";
 import { connectRedis, getSetting, getAdminIds, addAdminId, removeAdminId } from "./utils/redis.js";
 import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
-import { setupBroadcast } from "./handlers/broadcast.js";
-import { setupStats } from "./handlers/stats.js";
-import { setupAdminRelay } from "./handlers/adminRelay.js";
-import { setupMenu } from "./handlers/menu.js";
 import { getTargetChatId, setTargetChatId, setChannelLink } from "./utils/settings.js";
+import { adminMainKeyboard, userMainKeyboard, removeKeyboard, cancelKeyboard, KB } from "./utils/format.js";
 
 dotenv.config();
 
@@ -46,18 +43,8 @@ async function loadAdmins() {
   dbAdmins.forEach((id) => AdminSet.add(id));
 }
 
-AdminSet.size === 0 && void 0; // lazy init placeholder
-
 const bot = new Telegraf<Context>(TOKEN);
-
-// --- Performance / optimization: webhook secret validation ---
-function isWebhookValid(req: Request): boolean {
-  if (process.env.WEBHOOK_SECRET) {
-    const signature = req.headers["x-telegram-bot-api-secret-token"];
-    return signature === process.env.WEBHOOK_SECRET;
-  }
-  return true;
-}
+(bot as any).__adminSet = AdminSet;
 
 // --- Middleware: track user activity (non-blocking) ---
 bot.on("message", async (ctx, next) => {
@@ -79,106 +66,251 @@ bot.on("message", async (ctx, next) => {
   return next();
 });
 
-// /start and /help handled by menu.ts
+// --- /start — show main keyboard ---
+bot.start(async (ctx) => {
+  const isAdmin = AdminSet.has(ctx.from.id);
+  const greeting = isAdmin
+    ? "👋 *Hey admin, the bot is ready!*\n\nChoose an option below:"
+    : "👋 *Hey, I'm alive and ready!*\n\nChoose an option below:";
+  const kb = isAdmin ? adminMainKeyboard() : userMainKeyboard();
+  return ctx.reply(greeting, { parse_mode: KB, reply_markup: kb.reply_markup });
+});
+
+// --- Non-command /admin: interactive keyboard buttons ---
+bot.hears("📋 Help", async (ctx) => {
+  let h = "📋 *Help*\n\n";
+  h += "*/rejoin* — Get the channel invite link\n";
+  h += "*💬 Message admin* — Just send me a message!\n\n";
+  h += "🔒 _Admin buttons available in control panel._";
+  await ctx.reply(h, { parse_mode: KB });
+});
+
+bot.hears("🔗 Rejoin", async (ctx) => {
+  const inviteLink = await getSetting("channel_link");
+  if (!inviteLink) {
+    return ctx.reply("🔗 _Invite link is not configured._", { parse_mode: KB });
+  }
+  return ctx.reply(`🔗 *Click to join:*\n\n${inviteLink}`, { parse_mode: KB });
+});
+
+bot.hears("👤 My Info", async (ctx) => {
+  const user = await UserModel.findOne({ tgId: ctx.from.id });
+  let out = "👤 *Your Info*\n\n";
+  out += `*ID:* \`${ctx.from.id}\`\n`;
+  out += `*Name:* ${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}\n`;
+  if (user) {
+    out += `\n*Joined:* ${user.joinedAt.toISOString().slice(0, 10)}\n`;
+    const sec = Math.floor((Date.now() - user.lastActiveAt.getTime()) / 1000);
+    if (sec < 60) out += `*Last Active:* ${sec}s ago\n`;
+    else if (sec < 3600) out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
+    else if (sec < 86400) out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
+    else out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
+  }
+  return ctx.reply(out, { parse_mode: KB });
+});
+
+bot.hears("💬 Message Admin", async (ctx) => {
+  await ctx.reply("💬 _Just type your message and it will be forwarded to admins._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+});
+
+// --- Admin keyboard buttons ---
+bot.hears("📊 Stats", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  // Lazy import to avoid circular deps
+  const { showStats } = await import("./handlers/stats.js");
+  return showStats(ctx);
+});
+
+bot.hears("📢 Broadcast", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("📢 _Send the broadcast message now. Reply with your text or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "broadcast" });
+});
+
+bot.hears("⚡ Auto Approve", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  const { getAutoApprove, setAutoApprove } = await import("./utils/redis.js");
+  const { GlobalSettingsModel } = await import("./models/index.js");
+  const current = await getAutoApprove();
+  await setAutoApprove(!current);
+  const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
+  if (setting) {
+    (setting as any).value = !current;
+    await setting.save();
+  } else {
+    await GlobalSettingsModel.create({ key: "auto_approve", value: !current });
+  }
+  return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}_.\n\n${!current ? "✅ Requests will be approved automatically." : "🛡️ Admin will review each request."}`, {
+    parse_mode: KB,
+    reply_markup: adminMainKeyboard().reply_markup,
+  });
+});
+
+bot.hears("🔍 Bcast Status", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("🔍 _Send the broadcast ID to check status, or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "bcast_status" });
+});
+
+bot.hears("➕ Add Admin", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("➕ _Send the user ID to add as admin, or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "add_admin" });
+});
+
+bot.hears("➖ Remove Admin", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("➖ _Send the user ID to remove from admins, or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "remove_admin" });
+});
+
+bot.hears("👥 List Admins", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  const ids = [...AdminSet].map((id) => `\`${id}\``).join(", ");
+  return ctx.reply(`🛡️ *Admins* (${AdminSet.size}):\n\n${ids}`, { parse_mode: KB });
+});
+
+bot.hears("⚙️ Config", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  const chatId = await getTargetChatId();
+  const link = await getSetting("channel_link");
+  let c = "⚙️ *Current Config*\n\n";
+  c += `*Channel ID:* ${chatId ? `\`${chatId}\`` : "_not set_"}\n`;
+  c += `*Invite Link:* ${link || "_not set_"}`;
+  return ctx.reply(c, { parse_mode: KB });
+});
+
+bot.hears("📍 Set Channel", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("📍 _Send the channel chat ID (numeric), or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "set_channel" });
+});
+
+bot.hears("🔗 Set Link", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("🔗 _Send the Telegram invite link (https://t.me/...), or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "set_link" });
+});
+
+bot.hears("❌ Cancel", async (ctx) => {
+  const { clearAdminState } = await import("./utils/redis.js");
+  await clearAdminState(ctx.from.id);
+  return ctx.reply("🔙 _Operation cancelled._", {
+    parse_mode: KB,
+    reply_markup: AdminSet.has(ctx.from.id) ? adminMainKeyboard().reply_markup : userMainKeyboard().reply_markup,
+  });
+});
+
+// --- Manual command overrides (still work if typed) ---
 bot.command("rejoin", async (ctx) => {
   const inviteLink = await getSetting("channel_link");
   if (!inviteLink) return ctx.reply("Invite link is not configured.");
   return ctx.reply(`Here's the invite link: ${inviteLink}`);
 });
 
-// --- Runtime config commands (admin only) ---
-
-bot.command("setchannelid", async (ctx) => {
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
-  const text = ctx.message.text.slice("/setchannelid".length).trim();
-  if (!text) return ctx.reply("Usage: /setchannelid <chat_id>");
-  const chatId = parseInt(text, 10);
-  if (isNaN(chatId)) return ctx.reply("Invalid chat ID.");
-  await setTargetChatId(chatId);
-  return ctx.reply(`Target chat ID set to: ${chatId}`);
-});
-
-bot.command("setchannellink", async (ctx) => {
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
-  const text = ctx.message.text.slice("/setchannellink".length).trim();
-  if (!text) return ctx.reply("Usage: /setchannellink <invite_link>");
-  await setChannelLink(text);
-  return ctx.reply("Channel invite link set.");
-});
-
 bot.command("config", async (ctx) => {
-  const pm = "Markdown" as const;
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: KB });
   const chatId = await getTargetChatId();
   const link = await getSetting("channel_link");
   let c = "⚙️ *Current Config*\n\n";
   c += `*Channel ID:* ${chatId ? `\`${chatId}\`` : "_not set_"}\n`;
   c += `*Invite Link:* ${link || "_not set_"}`;
-  return ctx.reply(c, { parse_mode: "Markdown" });
+  return ctx.reply(c, { parse_mode: KB });
 });
 
-// --- Admin management ---
-
+// --- Admin management (commands still work as fallback) ---
 bot.command("addadmin", async (ctx) => {
-  const pm = "Markdown" as const;
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
-  const text = ctx.message.text.slice("/addadmin".length).trim();
-  if (!text) return ctx.reply("Usage: `/addadmin <userId>`", { parse_mode: pm });
-  // Check if admin replied to a message
-  const msg = ctx.message as any;
-  let userId: number | undefined;
-  if (msg.reply_to_message?.from) {
-    userId = msg.reply_to_message.from.id;
-  } else {
-    const parsed = parseInt(text, 10);
-    if (isNaN(parsed)) return ctx.reply("Invalid user ID.", { parse_mode: pm });
-    userId = parsed;
-  }
-
-  if (AdminSet.has(userId!)) return ctx.reply(`⚠ _User_ \`${userId}\` _is already an admin._`, { parse_mode: pm });
-
-  AdminSet.add(userId!);
-  await addAdminId(userId!);
-  await UserModel.updateOne({ tgId: userId! }, { $set: { tgId: userId!, isAdmin: true } }, { upsert: true });
-
-  return ctx.reply(`✅ _User_ \`${userId}\` _is now an admin._`, { parse_mode: pm });
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("➕ _Send the user ID to add as admin._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "add_admin" });
 });
 
 bot.command("removeadmin", async (ctx) => {
-  const pm = "Markdown" as const;
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
-  const text = ctx.message.text.slice("/removeadmin".length).trim();
-  const parsed = parseInt(text, 10) || 0;
-
-  if (!parsed) return ctx.reply("Usage: `/removeadmin <userId>`", { parse_mode: pm });
-  if (parsed === ctx.from.id) return ctx.reply("🚫 _Cannot remove yourself._", { parse_mode: pm });
-  if (!AdminSet.has(parsed)) return ctx.reply(`⚠ _User_ \`${parsed}\` _is not an admin._`, { parse_mode: pm });
-
-  AdminSet.delete(parsed);
-  await removeAdminId(parsed);
-  await UserModel.updateOne({ tgId: parsed }, { $set: { isAdmin: false } });
-
-  return ctx.reply(`🔻 _User_ \`${parsed}\` _is no longer an admin._`, { parse_mode: pm });
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("➖ _Send the user ID to remove._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "remove_admin" });
 });
 
-bot.command("listadmins", async (ctx) => {
-  const pm = "Markdown" as const;
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
-  const ids = [...AdminSet].map((id) => `\`${id}\``).join(", ");
-  return ctx.reply(`🛡️ *Admins* (${AdminSet.size}):\n\n${ids}`, { parse_mode: pm });
+bot.command("setchannelid", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  await ctx.reply("📍 _Send the channel chat ID._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "set_channel" });
 });
 
-// Setup feature handlers
-setupJoinRequest(bot, AdminSet);
-setupBroadcast(bot, AdminSet);
-setupStats(bot, AdminSet);
-setupAdminRelay(bot, AdminSet);
-setupMenu(bot, AdminSet);
+bot.command("setchannellink", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  await ctx.reply("🔗 _Send the invite link._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "set_link" });
+});
 
-// --- Express server with rate limiting and webhook validation ---
+bot.command("autoapprove", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  const { getAutoApprove, setAutoApprove } = await import("./utils/redis.js");
+  const { GlobalSettingsModel } = await import("./models/index.js");
+  const current = await getAutoApprove();
+  await setAutoApprove(!current);
+  const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
+  if (setting) { (setting as any).value = !current; await setting.save(); }
+  else { await GlobalSettingsModel.create({ key: "auto_approve", value: !current }); }
+  return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: KB });
+});
+
+// Setup feature handlers (called inside main() after async imports resolve)
+function setup(bot: any, AdminSet: Set<number>) {
+  setupJoinRequest(bot, AdminSet);
+  import("./handlers/adminRelay.js").then(({ setupAdminRelay }) => {
+    setupAdminRelay(bot, AdminSet);
+  });
+}
+
+// --- Express server ---
 async function main() {
   await connectDb(MONGO_URI!);
   logger.info("MongoDB connected");
+  setup(bot, AdminSet);
   await connectRedis(REDIS_URL);
   await loadAdmins();
 
@@ -186,21 +318,16 @@ async function main() {
 
   const app = express();
 
-  // app.use(rateLimit({ windowMs: 60_000, max: 1000, message: { error: "Too many requests" } }));
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "50mb" }));
 
   app.post(WEBHOOK_PATH, (req: Request, res: Response) => {
-    // if (!isWebhookValid(req)) return res.sendStatus(403);
-
     bot.handleUpdate(req.body, res).catch((err) => {
       logger.error({ err }, "Webhook handler error");
     });
-
     res.sendStatus(200);
   });
 
-  // Health check
   app.get("/health", (_req: Request, res: Response) => res.json({ status: "ok" }));
 
   app.listen(PORT, () => {
