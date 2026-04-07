@@ -117,7 +117,7 @@ bot.start(async (ctx) => {
     const isAdmin = AdminSet.has(ctx.from.id);
     const greeting = isAdmin
         ? "👋 *Hey admin, the bot is ready!*\n\nChoose an option below:"
-        : "👋 *Hey, I'm alive and ready!*\n\nChoose an option below:";
+        : "👋 *Welcome to OSM Support*\n\nSend your loot screenshots here. If you have any issue or any questions, feel free to message.\n\n⚡ _You will receive a reply as soon as possible._";
     const kb = isAdmin ? (0, format_js_1.adminMainKeyboard)() : (0, format_js_1.userMainKeyboard)();
     return ctx.reply(greeting, { parse_mode: format_js_1.KB, reply_markup: kb.reply_markup });
 });
