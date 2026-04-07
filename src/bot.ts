@@ -4,7 +4,7 @@ import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import pino from "pino";
 import { connectDb } from "./utils/db.js";
-import { connectRedis, getSetting } from "./utils/redis.js";
+import { connectRedis, getSetting, getAdminIds, addAdminId, removeAdminId } from "./utils/redis.js";
 import { UserModel, GlobalSettingsModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupBroadcast } from "./handlers/broadcast.js";
@@ -29,14 +29,22 @@ const WEBHOOK_PATH = process.env.WEBHOOK_PATH || "/tg-webhook";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 if (!WEBHOOK_URL) throw new Error("WEBHOOK_URL not set");
 
-// Comma-separated admin user IDs
-const ADMIN_IDS = (process.env.ADMIN_IDS || "")
+// Merge env-based admins with Redis-stored admins
+const envAdmins = (process.env.ADMIN_IDS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean)
   .map(Number);
 
-const AdminSet = new Set(ADMIN_IDS);
+const AdminSet = new Set<number>();
+envAdmins.forEach((id) => AdminSet.add(id));
+
+// Load admin IDs from DB at startup
+async function loadAdmins() {
+  const dbAdmins = await getAdminIds();
+  dbAdmins.forEach((id) => AdminSet.add(id));
+}
+AdminSet.size === 0 && void 0; // lazy init placeholder
 
 const bot = new Telegraf<Context>(TOKEN);
 
@@ -99,10 +107,65 @@ bot.command("setchannellink", async (ctx) => {
 });
 
 bot.command("config", async (ctx) => {
-  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  const pm = "Markdown" as const;
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
   const chatId = await getTargetChatId();
   const link = await getSetting("channel_link");
-  return ctx.reply(`Current config:\nTarget Chat ID: ${chatId ?? "(not set)"}\nChannel Link: ${link ?? "(not set)"}`);
+  let c = "⚙️ *Current Config*\n\n";
+  c += `*Channel ID:* ${chatId ? `\`${chatId}\`` : "_not set_"}\n`;
+  c += `*Invite Link:* ${link || "_not set_"}`;
+  return ctx.reply(c, { parse_mode: "Markdown" });
+});
+
+// --- Admin management ---
+
+bot.command("addadmin", async (ctx) => {
+  const pm = "Markdown" as const;
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
+  const text = ctx.message.text.slice("/addadmin".length).trim();
+  if (!text) return ctx.reply("Usage: `/addadmin <userId>`", { parse_mode: pm });
+  // Check if admin replied to a message
+  const msg = ctx.message as any;
+  let userId: number | undefined;
+  if (msg.reply_to_message?.from) {
+    userId = msg.reply_to_message.from.id;
+  } else {
+    const parsed = parseInt(text, 10);
+    if (isNaN(parsed)) return ctx.reply("Invalid user ID.", { parse_mode: pm });
+    userId = parsed;
+  }
+
+  if (AdminSet.has(userId!)) return ctx.reply(`⚠ _User_ \`${userId}\` _is already an admin._`, { parse_mode: pm });
+
+  AdminSet.add(userId!);
+  await addAdminId(userId!);
+  await UserModel.updateOne({ tgId: userId! }, { $set: { tgId: userId!, isAdmin: true } }, { upsert: true });
+
+  return ctx.reply(`✅ _User_ \`${userId}\` _is now an admin._`, { parse_mode: pm });
+});
+
+bot.command("removeadmin", async (ctx) => {
+  const pm = "Markdown" as const;
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
+  const text = ctx.message.text.slice("/removeadmin".length).trim();
+  const parsed = parseInt(text, 10) || 0;
+
+  if (!parsed) return ctx.reply("Usage: `/removeadmin <userId>`", { parse_mode: pm });
+  if (parsed === ctx.from.id) return ctx.reply("🚫 _Cannot remove yourself._", { parse_mode: pm });
+  if (!AdminSet.has(parsed)) return ctx.reply(`⚠ _User_ \`${parsed}\` _is not an admin._`, { parse_mode: pm });
+
+  AdminSet.delete(parsed);
+  await removeAdminId(parsed);
+  await UserModel.updateOne({ tgId: parsed }, { $set: { isAdmin: false } });
+
+  return ctx.reply(`🔻 _User_ \`${parsed}\` _is no longer an admin._`, { parse_mode: pm });
+});
+
+bot.command("listadmins", async (ctx) => {
+  const pm = "Markdown" as const;
+  if (!ctx.from || !AdminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: pm });
+  const ids = [...AdminSet].map((id) => `\`${id}\``).join(", ");
+  return ctx.reply(`🛡️ *Admins* (${AdminSet.size}):\n\n${ids}`, { parse_mode: pm });
 });
 
 // Setup feature handlers
@@ -116,6 +179,7 @@ async function main() {
   await connectDb(MONGO_URI!);
   logger.info("MongoDB connected");
   await connectRedis(REDIS_URL);
+  await loadAdmins();
 
   await bot.telegram.setWebhook(`${WEBHOOK_URL}${WEBHOOK_PATH}`);
 

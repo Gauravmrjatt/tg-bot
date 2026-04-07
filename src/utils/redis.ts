@@ -55,3 +55,20 @@ export async function getForwardedUser(forwardMsgId: number): Promise<number | n
   const v = await redis.get(`fwd:${forwardMsgId}`);
   return v ? parseInt(v, 10) : null;
 }
+
+export async function getAdminIds(): Promise<number[]> {
+  const raw = await redis.get("setting:admin_ids");
+  return raw ? JSON.parse(raw) : [];
+}
+
+export async function addAdminId(id: number) {
+  const ids = await getAdminIds();
+  if (!ids.includes(id)) ids.push(id);
+  await redis.set("setting:admin_ids", JSON.stringify(ids));
+}
+
+export async function removeAdminId(id: number) {
+  const ids = await getAdminIds().then(list => list.filter(x => x !== id));
+  await redis.set("setting:admin_ids", JSON.stringify(ids));
+}
+
