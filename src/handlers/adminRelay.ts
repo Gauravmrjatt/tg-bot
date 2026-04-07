@@ -49,6 +49,13 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
       if (replyTo?.message_id) {
         const userId = await getForwardedAdminUser(ctx.chat.id, replyTo.message_id);
         if (userId) {
+          // Check if admin is replying with /info — show user info instead of forwarding
+          const replyText = m.text || m.caption || "";
+          if (replyText === "/info" || replyText.startsWith("/info ")) {
+            await showUserInfo(ctx, userId);
+            return;
+          }
+
           try {
             await bot.telegram.copyMessage(userId, ctx.chat.id, ctx.message.message_id);
             await ctx.reply(`✅ _Reply sent to user_ \`${userId}\``, { parse_mode: PM });
