@@ -47,7 +47,6 @@ function setupAdminRelay(bot, adminSet) {
         if (m2.text && m2.text.startsWith("/"))
             return next();
         const userId = ctx.from.id;
-        const safeName = (0, format_js_1.esc)(`${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}${ctx.from.username ? " (@" + ctx.from.username + ")" : ""}`);
         const adminIdsArray = Array.from(adminSet);
         if (adminIdsArray.length === 0) {
             await ctx.reply("⚠️ _No admins are configured. Contact the bot owner._", { parse_mode: PM });
@@ -57,7 +56,6 @@ function setupAdminRelay(bot, adminSet) {
         for (const adminId of adminIdsArray) {
             try {
                 const fwd = await bot.telegram.forwardMessage(adminId, ctx.chat.id, ctx.message.message_id);
-                await bot.telegram.sendMessage(adminId, `📨 *from:* ${safeName}\n🆔 *ID:* \`${userId}\``, { parse_mode: PM });
                 await (0, redis_js_1.mapForwardedId)(adminId, fwd.message_id, userId);
                 successCount++;
             }

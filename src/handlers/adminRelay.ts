@@ -53,7 +53,6 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (m2.text && m2.text.startsWith("/")) return next();
 
     const userId = ctx.from.id;
-    const safeName = esc(`${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}${ctx.from.username ? " (@" + ctx.from.username + ")" : ""}`);
     const adminIdsArray = Array.from(adminSet);
 
     if (adminIdsArray.length === 0) {
@@ -65,7 +64,6 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     for (const adminId of adminIdsArray) {
       try {
         const fwd = await bot.telegram.forwardMessage(adminId, ctx.chat.id, ctx.message.message_id);
-        await bot.telegram.sendMessage(adminId, `📨 *from:* ${safeName}\n🆔 *ID:* \`${userId}\``, { parse_mode: PM });
         await mapForwardedId(adminId, fwd.message_id, userId);
         successCount++;
       } catch (e: any) {
