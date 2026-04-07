@@ -5,15 +5,16 @@ A Telegram bot written in TypeScript (Telegraf + Express) with webhook support, 
 ## Features
 
 - **Join Request Approval** — User requests to join a private channel, admins get Approve/Decline inline buttons. Redis-backed for instant response.
-- **Auto-Approve Mode** — Admin toggles via `/autoapprove`. When ON, join requests are approved automatically (still logged for audit).
-- **Broadcast with Delivery Tracking** — Rate-limited batch sending with `retry_after` handling. Delivered/failed/blocked counters. Check status with `/bcast <id>`.
-- **Admin Relay** — Users DM the bot, ALL message types (text, photos, docs, video, audio, stickers, polls) are forwarded to admins. Admin replies directly by tapping "reply" on the forwarded message.
-- **Inline Keyboards** — Users see basic menu (Help, Rejoin, My Info, Message Admin). Admins see full control panel (Broadcast, Stats, Admin Management, Config).
-- **Admin Management** — Add/remove admins at runtime. `/addadmin <userId>` (or reply to a message), `/removeadmin <userId>`, `/listadmins`.
+- **Auto-Approve Mode** — Global toggle. When ON, join requests are approved automatically (still logged for audit).
+- **Reply Keyboards** — Persistent buttons at the bottom, no commands needed. User buttons (Help, Rejoin, My Info, Message Admin). Admin buttons (Stats, Broadcast, Auto Approve, Admin Management, Config, Channel Settings).
+- **Conversational Flows** — Click a button → bot prompts for input → done. Every step has a Cancel button to return to main menu.
+- **Broadcast with Delivery Tracking** — Rate-limited batch sending with `retry_after` handling. Delivered/failed/blocked counters.
+- **Admin Relay** — Users DM the bot, ALL message types (text, photos, docs, video, audio, stickers, polls) are forwarded to admins. Each admin can reply directly to the forwarded message — reply resolves correctly per admin.
+- **Admin Management** — Add/remove admins at runtime via interactive flow with Cancel support.
 - **User Info** — `/info` shows name, username, ID, join date, last active, admin status.
-- **Stats Dashboard** — `/stats` shows user count, join request history, broadcast delivery rates.
+- **Stats Dashboard** — User count, join request history, broadcast delivery rates.
 - **User Tracking** — Every interacting user persists in MongoDB automatically.
-- **Runtime Config** — Channel ID, invite link set via commands. Stored in both DB and Redis.
+- **Runtime Config** — Channel ID, invite link set via buttons. Stored in both DB and Redis.
 
 ## Performance Optimizations
 
@@ -81,40 +82,44 @@ npm run dev
 2. **Create a "Request Admin Approval" invite link** for the channel (not an open link).
 3. **Set your admin user IDs** (find them by messaging the bot and checking logs, or use a bot like `@userinfobot`).
 
-## Commands
+## How It Works
 
 ### For Users
 
-| Command / Action | Description |
-|------------------|-------------|
-| `/start` | Shows welcome message with inline keyboard menu |
-| `/rejoin` | Get the channel invite link |
-| *(any DM)* | Send ANY message type (text, photo, doc, video, audio, sticker, poll) — it gets forwarded to admins |
-| 🔘 **Keyboard**: Help, Rejoin, My Info, Message Admin | Inline buttons shown on `/start` |
-| `?` | *(any DM)* | Send a message to admins. You'll get a confirmation reply. |
+| Action | Description |
+|--------|-------------|
+| `/start` | Shows welcome message with **reply keyboard** buttons |
+| 🔘 **📋 Help** | Shows available options |
+| 🔘 **🔗 Rejoin** | Get the channel invite link |
+| 🔘 **👤 My Info** | View your account details |
+| 🔘 **💬 Message Admin** | Prompts to type a message — it gets forwarded to admins |
+| *(any DM)* | Send ANY message type (text, photo, doc, video, audio, sticker, poll) — forwarded to admins |
 
 ### For Admins
 
-| Command | Description |
-|---------|-------------|
-| `/autoapprove` | Toggle auto-approve for join requests (ON/OFF) |
-| `/broadcast <message>` | Send a message to all registered users |
-| `/bcast <id>` | Check delivery status of a broadcast |
-| `/stats` | View bot statistics |
-| `/reply <userId> <message>` | Reply to a user who messaged the bot |
-| `/info` | View user info (name, username, ID, join date, etc.) |
-| `/addadmin <userId>` | Add a user as admin (or reply to a message with `/addadmin`) |
-| `/removeadmin <userId>` | Remove an admin |
-| `/listadmins` | List all current admins |
-| `/setchannelid <id>` | Set the private channel chat ID |
-| `/setchannellink <url>` | Set the invite link for `/rejoin` |
-| `/config` | View current runtime configuration |
+| Button | Flow |
+|--------|------|
+| 🔘 **📊 Stats** | Shows user count, join requests, broadcast stats |
+| 🔘 **📢 Broadcast** | Prompts for message text → sends to all users with delivery tracking |
+| 🔘 **⚡ Auto Approve** | Toggles auto-approve for join requests (ON/OFF) |
+| 🔘 **🔍 Bcast Status** | Prompts for broadcast ID → shows delivery status |
+| 🔘 **➕ Add Admin** | Prompts for user ID → adds as admin |
+| 🔘 **➖ Remove Admin** | Prompts for user ID → removes from admins |
+| 🔘 **👥 List Admins** | Shows all current admin IDs |
+| 🔘 **⚙️ Config** | Shows current channel ID and invite link |
+| 🔘 **📍 Set Channel** | Prompts for channel chat ID |
+| 🔘 **🔗 Set Link** | Prompts for invite link URL |
 
-### Admin Inline Actions
+### Admin Actions
 
-- **Join requests**: Approve/Decline buttons sent to admins
-- **User DMs**: Admin reply by directly tapping "reply" on the forwarded message (preserves ALL message types: text, photo, doc, video, audio, sticker, poll)
-- **Menu**: `/start` shows full admin inline keyboard with Broadcast, Stats, Auto Approve, Admin Management, Config, and Channel settings buttons
+- **Join requests**: Approve/Decline inline buttons sent to admins when someone requests to join
+- **Reply to users**: Tap "reply" on any forwarded user message — response is delivered to them. Each admin's reply mapping is cached separately, no failures.
+- **Cancel anytime**: Every conversational flow shows a **❌ Cancel** button to return to the main menu
+
+### Commands (Fallback)
+
+All interactive features work through buttons, but these commands still work as fallback:
+`/autoapprove`, `/broadcast`, `/bcast <id>`, `/info`, `/addadmin`, `/removeadmin`, `/rejoin`, `/config`, `/setchannelid`, `/setchannellink`
 
 ## Broadcast Flow
 
