@@ -20,6 +20,10 @@ exports.setAdminState = setAdminState;
 exports.clearAdminState = clearAdminState;
 exports.mapForwardedId = mapForwardedId;
 exports.getForwardedAdminUser = getForwardedAdminUser;
+exports.isUserBanned = isUserBanned;
+exports.banUser = banUser;
+exports.unbanUser = unbanUser;
+exports.getBannedUserIds = getBannedUserIds;
 const ioredis_1 = __importDefault(require("ioredis"));
 async function connectRedis(url) {
     exports.redis = new ioredis_1.default(url, { retryStrategy: (times) => Math.min(times * 50, 2000) });
@@ -99,4 +103,18 @@ async function mapForwardedId(adminChatId, adminMsgId, userId) {
 async function getForwardedAdminUser(adminChatId, adminMsgId) {
     const v = await exports.redis.get(`fwd:${adminChatId}:${adminMsgId}`);
     return v ? parseInt(v, 10) : null;
+}
+// --- Ban management — Redis set for fast lookups ---
+async function isUserBanned(userId) {
+    return exports.redis.sismember("banned:users", String(userId)).then(r => r === 1);
+}
+async function banUser(userId) {
+    await exports.redis.sadd("banned:users", String(userId));
+}
+async function unbanUser(userId) {
+    await exports.redis.srem("banned:users", String(userId));
+}
+async function getBannedUserIds() {
+    const raw = await exports.redis.smembers("banned:users");
+    return raw.map(Number);
 }

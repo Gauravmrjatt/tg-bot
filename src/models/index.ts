@@ -7,6 +7,7 @@ export const UserSchema = new mongoose.Schema({
   lastName: String,
   username: String,
   isAdmin: { type: Boolean, default: false },
+  isBanned: { type: Boolean, default: false },
   joinedAt: { type: Date, default: Date.now },
   lastActiveAt: { type: Date, default: Date.now },
 });

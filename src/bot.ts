@@ -230,6 +230,26 @@ bot.hears("🔗 Set Link", async (ctx) => {
   await setAdminState(ctx.from.id, { action: "set_link" });
 });
 
+bot.hears("🚫 Ban User", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("🚫 _Send the user ID to ban, or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "ban_user" });
+});
+
+bot.hears("✅ Unban User", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  await ctx.reply("✅ _Send the user ID to unban, or press Cancel._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "unban_user" });
+});
+
 bot.hears("❌ Cancel", async (ctx) => {
   const { clearAdminState } = await import("./utils/redis.js");
   await clearAdminState(ctx.from.id);
@@ -303,6 +323,26 @@ bot.command("autoapprove", async (ctx) => {
   const current = await getAutoApprove();
   await setAutoApprove(!current);
   return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: KB });
+});
+
+bot.command("ban", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  await ctx.reply("🚫 _Send the user ID to ban._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "ban_user" });
+});
+
+bot.command("unban", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+  await ctx.reply("✅ _Send the user ID to unban._", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "unban_user" });
 });
 
 // Setup feature handlers

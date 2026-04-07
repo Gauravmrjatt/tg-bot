@@ -3,6 +3,7 @@ import {
   mapForwardedId, getForwardedAdminUser,
   getAdminState, clearAdminState,
   addAdminId, removeAdminId,
+  banUser, unbanUser, isUserBanned,
 } from "../utils/redis.js";
 import { UserModel, BroadcastModel } from "../models/index.js";
 import { setTargetChatId, setChannelLink } from "../utils/settings.js";
@@ -84,6 +85,14 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (m2.text && m2.text.startsWith("/")) return next();
 
     const userId = ctx.from.id;
+
+    // Check if user is banned
+    const banned = await isUserBanned(userId);
+    if (banned) {
+      await ctx.reply("🚫 _You are banned by admin. Your messages will not be delivered._", { parse_mode: PM });
+      return;
+    }
+
     const adminIdsArray = Array.from(adminSet);
 
     if (adminIdsArray.length === 0) {
@@ -293,6 +302,63 @@ async function handleAdminFlow(
       msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
       msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
       return ctx.reply(msg, {
+        parse_mode: PM,
+        reply_markup: adminMainKeyboard().reply_markup,
+      });
+    }
+
+    case "ban_user": {
+      const userId = parseInt(text, 10);
+      if (isNaN(userId)) {
+        return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      if (adminSet.has(userId)) {
+        await clearAdminState(uid);
+        return ctx.reply("🚫 _Cannot ban an admin._", {
+          parse_mode: PM,
+          reply_markup: adminMainKeyboard().reply_markup,
+        });
+      }
+      const alreadyBanned = await isUserBanned(userId);
+      if (alreadyBanned) {
+        await clearAdminState(uid);
+        return ctx.reply(`⚠ _User_ \`${userId}\` _is already banned._`, {
+          parse_mode: PM,
+          reply_markup: adminMainKeyboard().reply_markup,
+        });
+      }
+      await banUser(userId);
+      await UserModel.updateOne({ tgId: userId }, { $set: { isBanned: true } }, { upsert: true });
+      await clearAdminState(uid);
+      return ctx.reply(`🚫 _User_ \`${userId}\` _has been banned._`, {
+        parse_mode: PM,
+        reply_markup: adminMainKeyboard().reply_markup,
+      });
+    }
+
+    case "unban_user": {
+      const userId = parseInt(text, 10);
+      if (isNaN(userId)) {
+        return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      const banned = await isUserBanned(userId);
+      if (!banned) {
+        await clearAdminState(uid);
+        return ctx.reply(`⚠ _User_ \`${userId}\` _is not banned._`, {
+          parse_mode: PM,
+          reply_markup: adminMainKeyboard().reply_markup,
+        });
+      }
+      await unbanUser(userId);
+      await UserModel.updateOne({ tgId: userId }, { $set: { isBanned: false } });
+      await clearAdminState(uid);
+      return ctx.reply(`✅ _User_ \`${userId}\` _has been unbanned._`, {
         parse_mode: PM,
         reply_markup: adminMainKeyboard().reply_markup,
       });

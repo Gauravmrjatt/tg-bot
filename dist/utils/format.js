@@ -29,6 +29,7 @@ function adminMainKeyboard() {
         ["➕ Add Admin", "➖ Remove Admin"],
         ["👥 List Admins", "⚙️ Config"],
         ["📍 Set Channel", "🔗 Set Link"],
+        ["🚫 Ban User", "✅ Unban User"],
     ]).resize();
 }
 // Cancel button — shown during conversational flows

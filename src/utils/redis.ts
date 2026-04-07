@@ -99,3 +99,21 @@ export async function getForwardedAdminUser(adminChatId: number, adminMsgId: num
   const v = await redis.get(`fwd:${adminChatId}:${adminMsgId}`);
   return v ? parseInt(v, 10) : null;
 }
+
+// --- Ban management — Redis set for fast lookups ---
+export async function isUserBanned(userId: number): Promise<boolean> {
+  return redis.sismember("banned:users", String(userId)).then(r => r === 1);
+}
+
+export async function banUser(userId: number) {
+  await redis.sadd("banned:users", String(userId));
+}
+
+export async function unbanUser(userId: number) {
+  await redis.srem("banned:users", String(userId));
+}
+
+export async function getBannedUserIds(): Promise<number[]> {
+  const raw = await redis.smembers("banned:users");
+  return raw.map(Number);
+}
