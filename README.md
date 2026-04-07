@@ -123,10 +123,12 @@ All interactive features work through buttons, but these commands still work as 
 
 ## Broadcast Flow
 
-1. Admin sends `/broadcast Hello everyone!`
-2. Bot sends to all registered users and tracks results
-3. Returns: `Broadcast complete! Delivered: 50, Failed: 2, Blocked: 3, Total: 55`
-4. Admin can check status later with `/bcast bc_12345_abcde`
+1. Admin taps **📢 Broadcast** button
+2. Bot prompts: "Send the broadcast message now"
+3. Admin types the message text
+4. Bot broadcasts to all users with delivery tracking
+5. Returns: `📢 Broadcast Complete. Delivered: 50, Failed: 2, Blocked: 3, Total: 55`
+6. Admin can check status later by tapping **🔍 Bcast Status** and sending the broadcast ID
 
 ## Project Structure
 
