@@ -20,10 +20,10 @@ export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
     await BroadcastModel.create({ messageId: broadcastId, text });
 
     const users = await UserModel.find({}, { tgId: 1 }).lean();
-    if (users.length === 0) return ctx.reply("No users to broadcast to.");
+    if (users.length === 0) return ctx.reply("📢 _No users to broadcast to._", { parse_mode: "Markdown" });
 
     await BroadcastModel.updateOne({ messageId: broadcastId }, { totalTargeted: users.length });
-    await ctx.reply(`Broadcasting to ${users.length} users... ID: \`${broadcastId}\``, { parse_mode: "Markdown" });
+    await ctx.reply(`📢 *Broadcasting* to ${users.length} users...\n\n🆔 ID: \`${broadcastId}\``, { parse_mode: "Markdown" });
 
     let delivered = 0;
     let failed = 0;
@@ -71,7 +71,8 @@ export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
     );
 
     return ctx.reply(
-      `Broadcast complete!\nDelivered: ${delivered}\nFailed: ${failed}\nBlocked: ${blocked}\nTotal: ${users.length}`
+      `📢 *Broadcast Complete*\n\n🟢 Delivered: *${delivered}*\n🔴 Failed: *${failed}*\n🚫 Blocked: *${blocked}*\n📊 Total: *${users.length}*`,
+      { parse_mode: "Markdown" }
     );
   });
 

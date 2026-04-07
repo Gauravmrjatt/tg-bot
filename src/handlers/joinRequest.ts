@@ -16,7 +16,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
     } else {
       await GlobalSettingsModel.create({ key: "auto_approve", value: !current });
     }
-    return ctx.reply(`Auto-approve is now ${!current ? "ON" : "OFF"}. ${!current ? "Join requests will be approved automatically." : "Admins will review each request."}`);
+    return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}_.\n${!current ? "✅ Join requests will be approved automatically." : "🛡️ Admins will review each request."}`, { parse_mode: "Markdown" });
   });
 
   bot.on("chat_join_request", async (ctx) => {
@@ -58,7 +58,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
         });
         for (const adminId of adminSet) {
           try {
-            await bot.telegram.sendMessage(adminId, `Auto-approved join request from ${name}`);
+            await bot.telegram.sendMessage(adminId, `✅ *Auto-approved* join request from _${name}_`, { parse_mode: "Markdown" });
           } catch {
             /* ignore */
           }
@@ -81,7 +81,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
       ]);
       for (const adminId of adminSet) {
         try {
-          const msg = await bot.telegram.sendMessage(adminId, `Join request from ${name}\nChat ID: ${joinReq.chat.id}`, {
+          const msg = await bot.telegram.sendMessage(adminId, `📨 *Join Request*\n\n*Name:* _${name}_\n*Chat ID:* \`${joinReq.chat.id}\``, {
             reply_markup: kb.reply_markup,
           });
           await JoinRequestModel.create({

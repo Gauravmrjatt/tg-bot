@@ -69,8 +69,8 @@ bot.on("message", async (ctx, next) => {
   return next();
 });
 
-bot.start((ctx) => ctx.reply("Hey, I'm alive!"));
-bot.help((ctx) => ctx.reply("Available commands:\n/rejoin — Get the channel invite link"));
+bot.start((ctx) => ctx.reply("👋 Hey, I'm alive and ready!", { parse_mode: "Markdown" }));
+bot.help((ctx) => ctx.reply("📋 *Available commands:*", { parse_mode: "Markdown" }));
 
 bot.command("rejoin", async (ctx) => {
   const inviteLink = await getSetting("channel_link");
