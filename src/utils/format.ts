@@ -18,7 +18,7 @@ export function adminInlineKeyboard() {
     [Markup.button.callback("➕ Add Admin", "admin_addadmin"), Markup.button.callback("➖ Remove Admin", "admin_removeadmin")],
     [Markup.button.callback("👥 List Admins", "admin_listadmins"), Markup.button.callback("⚙️ Config", "admin_config")],
     [Markup.button.callback("📍 Set Channel", "admin_setchannel"), Markup.button.callback("🔗 Set Link", "admin_channellink")],
-    Markup.button.callback("📋 User Options", "menu"),
+    [Markup.button.callback("📋 User Options", "menu")],
   ]);
 }
 

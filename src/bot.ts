@@ -5,11 +5,12 @@ import dotenv from "dotenv";
 import pino from "pino";
 import { connectDb } from "./utils/db.js";
 import { connectRedis, getSetting, getAdminIds, addAdminId, removeAdminId } from "./utils/redis.js";
-import { UserModel, GlobalSettingsModel } from "./models/index.js";
+import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupBroadcast } from "./handlers/broadcast.js";
 import { setupStats } from "./handlers/stats.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
+import { setupMenu } from "./handlers/menu.js";
 import { getTargetChatId, setTargetChatId, setChannelLink } from "./utils/settings.js";
 
 dotenv.config();
@@ -44,6 +45,7 @@ async function loadAdmins() {
   const dbAdmins = await getAdminIds();
   dbAdmins.forEach((id) => AdminSet.add(id));
 }
+
 AdminSet.size === 0 && void 0; // lazy init placeholder
 
 const bot = new Telegraf<Context>(TOKEN);
@@ -77,9 +79,7 @@ bot.on("message", async (ctx, next) => {
   return next();
 });
 
-bot.start((ctx) => ctx.reply("👋 Hey, I'm alive and ready!", { parse_mode: "Markdown" }));
-bot.help((ctx) => ctx.reply("📋 *Available commands:*", { parse_mode: "Markdown" }));
-
+// /start and /help handled by menu.ts
 bot.command("rejoin", async (ctx) => {
   const inviteLink = await getSetting("channel_link");
   if (!inviteLink) return ctx.reply("Invite link is not configured.");
@@ -173,6 +173,7 @@ setupJoinRequest(bot, AdminSet);
 setupBroadcast(bot, AdminSet);
 setupStats(bot, AdminSet);
 setupAdminRelay(bot, AdminSet);
+setupMenu(bot, AdminSet);
 
 // --- Express server with rate limiting and webhook validation ---
 async function main() {
