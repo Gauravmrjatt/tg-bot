@@ -250,6 +250,22 @@ bot.hears("✅ Unban User", async (ctx) => {
     const { setAdminState } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
     await setAdminState(ctx.from.id, { action: "unban_user" });
 });
+bot.hears("📋 List Banned", async (ctx) => {
+    if (!AdminSet.has(ctx.from.id))
+        return;
+    const { UserModel } = await Promise.resolve().then(() => __importStar(require("./models/index.js")));
+    const banned = await UserModel.find({ isBanned: true }, { tgId: 1, username: 1, firstName: 1, lastName: 1 }).lean();
+    if (banned.length === 0) {
+        return ctx.reply("📋 _No banned users._", { parse_mode: format_js_1.KB });
+    }
+    let msg = `🚫 *Banned Users* (${banned.length}):\n\n`;
+    for (const u of banned) {
+        const name = `${u.firstName || ""} ${u.lastName || ""}`.trim() || "N/A";
+        const un = u.username ? `@${u.username}` : "no username";
+        msg += `• \`${u.tgId}\` — ${name} (${un})\n`;
+    }
+    return ctx.reply(msg, { parse_mode: format_js_1.KB });
+});
 bot.hears("❌ Cancel", async (ctx) => {
     const { clearAdminState } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
     await clearAdminState(ctx.from.id);

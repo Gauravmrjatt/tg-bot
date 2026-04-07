@@ -23,6 +23,7 @@ export function adminMainKeyboard() {
     ["👥 List Admins", "⚙️ Config"],
     ["📍 Set Channel", "🔗 Set Link"],
     ["🚫 Ban User", "✅ Unban User"],
+    ["📋 List Banned"],
   ]).resize();
 }
 
