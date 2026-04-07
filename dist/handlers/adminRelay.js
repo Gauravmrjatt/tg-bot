@@ -12,16 +12,11 @@ function setupAdminRelay(bot, adminSet) {
     bot.on("message", async (ctx, next) => {
         if (!ctx.from)
             return next();
-        // Admin with active conversational state
+        // Admin: check for reply to forwarded message OR interactive flow
         if (adminSet.has(ctx.from.id)) {
-            const state = await (0, redis_js_1.getAdminState)(ctx.from.id);
-            if (state) {
-                await handleAdminFlow(bot, ctx, state, adminSet);
-                return;
-            }
-            // Check for admin reply to a forwarded message
             const m = ctx.message;
             const replyTo = m.reply_to_message;
+            // First priority: admin replying to a forwarded message
             if (replyTo?.message_id) {
                 const userId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, replyTo.message_id);
                 if (userId) {
@@ -36,9 +31,16 @@ function setupAdminRelay(bot, adminSet) {
                     return;
                 }
             }
+            // Second priority: interactive admin state flow
+            const state = await (0, redis_js_1.getAdminState)(ctx.from.id);
+            if (state) {
+                await handleAdminFlow(bot, ctx, state, adminSet);
+                return;
+            }
+            // Admin sent a regular message with no state and no reply mapping — ignore
             return next();
         }
-        // Non-admin: forward DMs
+        // Non-admin: forward DMs to admins
         if (ctx.chat.type !== "private")
             return next();
         const m2 = ctx.message;
@@ -46,41 +48,29 @@ function setupAdminRelay(bot, adminSet) {
             return next();
         const userId = ctx.from.id;
         const name = `${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}${ctx.from.username ? " (@" + ctx.from.username + ")" : ""}`;
-        let sent = false;
         const adminIdsArray = Array.from(adminSet);
-        + +;
         if (adminIdsArray.length === 0) {
-            +await ctx.reply("⚠️ _No admins are configured. Contact the bot owner._", { parse_mode: PM });
-            +;
+            await ctx.reply("⚠️ _No admins are configured. Contact the bot owner._", { parse_mode: PM });
             return;
-            +;
         }
-        + +;
+        let successCount = 0;
         for (const adminId of adminIdsArray) {
-            +;
             try {
-                +;
                 const fwd = await bot.telegram.forwardMessage(adminId, ctx.chat.id, ctx.message.message_id);
-                +await bot.telegram.sendMessage(adminId, `📨 _from:_ ${name}\n🆔 _ID:_ \`${userId}\``, { parse_mode: PM });
-                +await (0, redis_js_1.mapForwardedId)(adminId, fwd.message_id, userId);
-                +sent;
-                true;
-                +;
+                await bot.telegram.sendMessage(adminId, `📨 _from:_ ${name}\n🆔 _ID:_ \`${userId}\``, { parse_mode: PM });
+                await (0, redis_js_1.mapForwardedId)(adminId, fwd.message_id, userId);
+                successCount++;
             }
             catch (e) {
-                + +console.error(`Failed to forward to admin ${adminId}:`, e);
-                +;
+                const errMsg = e?.response?.description || e?.message || "Unknown";
+                console.error(`Failed to forward to admin ${adminId}: ${errMsg}`);
             }
-            +;
         }
-        + +;
-        if (sent) {
-            +await ctx.reply("✅ _Your message has been sent to admins._", { parse_mode: PM });
-            +;
+        if (successCount > 0) {
+            await ctx.reply("✅ _Your message has been sent to admins._", { parse_mode: PM });
         }
         else {
-            +await ctx.reply("❌ _Failed to reach any admin. Try again later._", { parse_mode: PM });
-            +;
+            await ctx.reply("❌ _Failed to reach any admin. Try again later._", { parse_mode: PM });
         }
     });
     // --- /info command ---
@@ -128,15 +118,21 @@ function setupAdminRelay(bot, adminSet) {
         }
         return ctx.reply(out, { parse_mode: PM });
     });
-    // --- Broadcast status check via conversation ---
+    // --- /bcast command ---
     bot.command("bcast", async (ctx) => {
         if (!ctx.from || !adminSet.has(ctx.from.id))
             return;
         const id = ctx.message.text.slice("/bcast".length).trim();
         if (!id)
             return ctx.reply("Usage: `/bcast <id>`", { parse_mode: PM });
-        // Just pass to the existing handler
-        await ctx.reply(`🔍 _Checking broadcast \` ${id}\`..._`, { parse_mode: PM });
+        const bc = await index_js_1.BroadcastModel.findOne({ messageId: id }).lean();
+        if (!bc)
+            return ctx.reply("Broadcast not found.", { parse_mode: PM });
+        let msg = `📢 *Broadcast* \`${bc.messageId}\`\n`;
+        msg += `*Status:* _${bc.status}_\n`;
+        msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
+        msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
+        return ctx.reply(msg, { parse_mode: PM });
     });
 }
 async function handleAdminFlow(bot, ctx, state, adminSet) {

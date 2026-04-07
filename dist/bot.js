@@ -44,6 +44,7 @@ const db_js_1 = require("./utils/db.js");
 const redis_js_1 = require("./utils/redis.js");
 const index_js_1 = require("./models/index.js");
 const joinRequest_js_1 = require("./handlers/joinRequest.js");
+const adminRelay_js_1 = require("./handlers/adminRelay.js");
 const settings_js_1 = require("./utils/settings.js");
 const format_js_1 = require("./utils/format.js");
 dotenv_1.default.config();
@@ -326,20 +327,19 @@ bot.command("autoapprove", async (ctx) => {
     }
     return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: format_js_1.KB });
 });
-// Setup feature handlers (called inside main() after async imports resolve)
+// Setup feature handlers
 function setup(bot, AdminSet) {
     (0, joinRequest_js_1.setupJoinRequest)(bot, AdminSet);
-    Promise.resolve().then(() => __importStar(require("./handlers/adminRelay.js"))).then(({ setupAdminRelay }) => {
-        setupAdminRelay(bot, AdminSet);
-    });
+    (0, adminRelay_js_1.setupAdminRelay)(bot, AdminSet);
 }
 // --- Express server ---
 async function main() {
     await (0, db_js_1.connectDb)(MONGO_URI);
     logger.info("MongoDB connected");
-    setup(bot, AdminSet);
     await (0, redis_js_1.connectRedis)(REDIS_URL);
     await loadAdmins();
+    // Register admin relay FIRST so it processes messages before other handlers
+    setup(bot, AdminSet);
     await bot.telegram.setWebhook(`${WEBHOOK_URL}${WEBHOOK_PATH}`);
     const app = (0, express_1.default)();
     app.set("trust proxy", 1);
