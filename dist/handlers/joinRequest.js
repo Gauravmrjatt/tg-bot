@@ -13,14 +13,6 @@ function setupJoinRequest(bot, adminSet) {
             return ctx.reply("Admin only.");
         const current = await (0, redis_js_1.getAutoApprove)();
         await (0, redis_js_1.setAutoApprove)(!current);
-        const setting = await index_js_1.GlobalSettingsModel.findOne({ key: "auto_approve" });
-        if (setting) {
-            setting.value = !current;
-            await setting.save();
-        }
-        else {
-            await index_js_1.GlobalSettingsModel.create({ key: "auto_approve", value: !current });
-        }
         return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}_.\n${!current ? "✅ Join requests will be approved automatically." : "🛡️ Admins will review each request."}`, { parse_mode: "Markdown" });
     });
     bot.on("chat_join_request", async (ctx) => {

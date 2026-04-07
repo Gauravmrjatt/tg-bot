@@ -1,15 +1,14 @@
 import { Telegraf, Context } from "telegraf";
 import express, { Request, Response } from "express";
-import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import pino from "pino";
 import { connectDb } from "./utils/db.js";
-import { connectRedis, getSetting, getAdminIds, addAdminId, removeAdminId } from "./utils/redis.js";
+import { connectRedis, getSetting, getAdminIds } from "./utils/redis.js";
 import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
-import { getTargetChatId, setTargetChatId, setChannelLink } from "./utils/settings.js";
-import { adminMainKeyboard, userMainKeyboard, removeKeyboard, cancelKeyboard, KB, esc } from "./utils/format.js";
+import { getTargetChatId } from "./utils/settings.js";
+import { adminMainKeyboard, userMainKeyboard, cancelKeyboard, KB, esc } from "./utils/format.js";
 
 dotenv.config();
 
@@ -47,25 +46,44 @@ async function loadAdmins() {
 const bot = new Telegraf<Context>(TOKEN);
 (bot as any).__adminSet = AdminSet;
 
-// --- Middleware: track user activity (non-blocking) ---
+// --- Middleware: track user activity (batched, non-blocking) ---
+// Batch updates in memory and flush every 10s to reduce MongoDB write pressure
+const activityBatch = new Map<number, { firstName: string; lastName?: string; username?: string; isAdmin: boolean; lastActiveAt: Date }>();
+let activityFlushInterval: ReturnType<typeof setInterval> | null = null;
+
+async function flushActivityBatch() {
+  if (activityBatch.size === 0) return;
+  const ops = [...activityBatch.entries()];
+  activityBatch.clear();
+  const bulkOps = ops.map(([tgId, data]) => ({
+    updateOne: {
+      filter: { tgId },
+      update: { $set: { ...data } },
+      upsert: true,
+    },
+  }));
+  await UserModel.bulkWrite(bulkOps, { ordered: false }).catch(() => {});
+}
+
+function startActivityFlush() {
+  if (activityFlushInterval) return;
+  activityFlushInterval = setInterval(flushActivityBatch, 10_000);
+  activityFlushInterval.unref(); // Don't keep process alive for this
+}
+
 bot.on("message", async (ctx, next) => {
   const user = ctx.from;
-  // Fire-and-forget — don't block the pipeline
-  UserModel.updateOne(
-    { tgId: user.id },
-    {
-      $set: {
-        firstName: user.first_name,
-        lastName: user.last_name,
-        username: user.username,
-        isAdmin: AdminSet.has(user.id),
-        lastActiveAt: new Date(),
-      },
-    },
-    { upsert: true },
-  ).catch(() => {});
+  activityBatch.set(user.id, {
+    firstName: user.first_name,
+    lastName: user.last_name,
+    username: user.username,
+    isAdmin: AdminSet.has(user.id),
+    lastActiveAt: new Date(),
+  });
   return next();
 });
+
+startActivityFlush();
 
 // --- /start — show main keyboard ---
 bot.start(async (ctx) => {
@@ -138,16 +156,8 @@ bot.hears("📢 Broadcast", async (ctx) => {
 bot.hears("⚡ Auto Approve", async (ctx) => {
   if (!AdminSet.has(ctx.from.id)) return;
   const { getAutoApprove, setAutoApprove } = await import("./utils/redis.js");
-  const { GlobalSettingsModel } = await import("./models/index.js");
   const current = await getAutoApprove();
   await setAutoApprove(!current);
-  const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
-  if (setting) {
-    (setting as any).value = !current;
-    await setting.save();
-  } else {
-    await GlobalSettingsModel.create({ key: "auto_approve", value: !current });
-  }
   return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}_.\n\n${!current ? "✅ Requests will be approved automatically." : "🛡️ Admin will review each request."}`, {
     parse_mode: KB,
     reply_markup: adminMainKeyboard().reply_markup,
@@ -290,12 +300,8 @@ bot.command("setchannellink", async (ctx) => {
 bot.command("autoapprove", async (ctx) => {
   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
   const { getAutoApprove, setAutoApprove } = await import("./utils/redis.js");
-  const { GlobalSettingsModel } = await import("./models/index.js");
   const current = await getAutoApprove();
   await setAutoApprove(!current);
-  const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
-  if (setting) { (setting as any).value = !current; await setting.save(); }
-  else { await GlobalSettingsModel.create({ key: "auto_approve", value: !current }); }
   return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: KB });
 });
 

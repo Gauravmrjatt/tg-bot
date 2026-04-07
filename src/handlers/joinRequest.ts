@@ -1,5 +1,5 @@
 import { Context, Markup, Telegraf } from "telegraf";
-import { UserModel, JoinRequestModel, GlobalSettingsModel } from "../models/index.js";
+import { UserModel, JoinRequestModel } from "../models/index.js";
 import { getAutoApprove, setAutoApprove, cachePendingRequest, getPendingRequest, removePendingRequest } from "../utils/redis.js";
 import { getTargetChatId } from "../utils/settings.js";
 import { esc } from "../utils/format.js";
@@ -10,13 +10,6 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
     if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
     const current = await getAutoApprove();
     await setAutoApprove(!current);
-    const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
-    if (setting) {
-      setting.value = !current;
-      await setting.save();
-    } else {
-      await GlobalSettingsModel.create({ key: "auto_approve", value: !current });
-    }
     return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}_.\n${!current ? "✅ Join requests will be approved automatically." : "🛡️ Admins will review each request."}`, { parse_mode: "Markdown" });
   });
 

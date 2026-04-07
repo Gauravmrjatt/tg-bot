@@ -76,21 +76,42 @@ async function loadAdmins() {
 }
 const bot = new telegraf_1.Telegraf(TOKEN);
 bot.__adminSet = AdminSet;
-// --- Middleware: track user activity (non-blocking) ---
+// --- Middleware: track user activity (batched, non-blocking) ---
+// Batch updates in memory and flush every 10s to reduce MongoDB write pressure
+const activityBatch = new Map();
+let activityFlushInterval = null;
+async function flushActivityBatch() {
+    if (activityBatch.size === 0)
+        return;
+    const ops = [...activityBatch.entries()];
+    activityBatch.clear();
+    const bulkOps = ops.map(([tgId, data]) => ({
+        updateOne: {
+            filter: { tgId },
+            update: { $set: { ...data } },
+            upsert: true,
+        },
+    }));
+    await index_js_1.UserModel.bulkWrite(bulkOps, { ordered: false }).catch(() => { });
+}
+function startActivityFlush() {
+    if (activityFlushInterval)
+        return;
+    activityFlushInterval = setInterval(flushActivityBatch, 10000);
+    activityFlushInterval.unref(); // Don't keep process alive for this
+}
 bot.on("message", async (ctx, next) => {
     const user = ctx.from;
-    // Fire-and-forget — don't block the pipeline
-    index_js_1.UserModel.updateOne({ tgId: user.id }, {
-        $set: {
-            firstName: user.first_name,
-            lastName: user.last_name,
-            username: user.username,
-            isAdmin: AdminSet.has(user.id),
-            lastActiveAt: new Date(),
-        },
-    }, { upsert: true }).catch(() => { });
+    activityBatch.set(user.id, {
+        firstName: user.first_name,
+        lastName: user.last_name,
+        username: user.username,
+        isAdmin: AdminSet.has(user.id),
+        lastActiveAt: new Date(),
+    });
     return next();
 });
+startActivityFlush();
 // --- /start — show main keyboard ---
 bot.start(async (ctx) => {
     const isAdmin = AdminSet.has(ctx.from.id);
@@ -162,17 +183,8 @@ bot.hears("⚡ Auto Approve", async (ctx) => {
     if (!AdminSet.has(ctx.from.id))
         return;
     const { getAutoApprove, setAutoApprove } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
-    const { GlobalSettingsModel } = await Promise.resolve().then(() => __importStar(require("./models/index.js")));
     const current = await getAutoApprove();
     await setAutoApprove(!current);
-    const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
-    if (setting) {
-        setting.value = !current;
-        await setting.save();
-    }
-    else {
-        await GlobalSettingsModel.create({ key: "auto_approve", value: !current });
-    }
     return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}_.\n\n${!current ? "✅ Requests will be approved automatically." : "🛡️ Admin will review each request."}`, {
         parse_mode: format_js_1.KB,
         reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
@@ -314,17 +326,8 @@ bot.command("autoapprove", async (ctx) => {
     if (!AdminSet.has(ctx.from.id))
         return ctx.reply("Admin only.");
     const { getAutoApprove, setAutoApprove } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
-    const { GlobalSettingsModel } = await Promise.resolve().then(() => __importStar(require("./models/index.js")));
     const current = await getAutoApprove();
     await setAutoApprove(!current);
-    const setting = await GlobalSettingsModel.findOne({ key: "auto_approve" });
-    if (setting) {
-        setting.value = !current;
-        await setting.save();
-    }
-    else {
-        await GlobalSettingsModel.create({ key: "auto_approve", value: !current });
-    }
     return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: format_js_1.KB });
 });
 // Setup feature handlers

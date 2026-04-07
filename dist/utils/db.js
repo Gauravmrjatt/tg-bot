@@ -8,5 +8,10 @@ const mongoose_1 = __importDefault(require("mongoose"));
 async function connectDb(uri) {
     if (mongoose_1.default.connection.readyState >= 1)
         return;
-    return mongoose_1.default.connect(uri);
+    return mongoose_1.default.connect(uri, {
+        maxPoolSize: 50,
+        minPoolSize: 5,
+        serverSelectionTimeoutMS: 10000,
+        socketTimeoutMS: 30000,
+    });
 }

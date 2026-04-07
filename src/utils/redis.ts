@@ -12,7 +12,7 @@ export async function connectRedis(url: string) {
   console.log("Redis connected");
 }
 
-const SETTING_TTL = 3600; // 1h
+const AUTO_APPROVE_TTL = 3600; // 1h — cache TTL for auto_approve flag
 
 export async function getAutoApprove(): Promise<boolean> {
   const cached = await redis.get("setting:auto_approve");
@@ -21,7 +21,7 @@ export async function getAutoApprove(): Promise<boolean> {
 }
 
 export async function setAutoApprove(value: boolean): Promise<void> {
-  await redis.set("setting:auto_approve", value ? "1" : "0", "EX", SETTING_TTL);
+  await redis.set("setting:auto_approve", value ? "1" : "0", "EX", AUTO_APPROVE_TTL);
 }
 
 export async function cachePendingRequest(userId: number, data: Record<string, unknown>) {
@@ -42,23 +42,20 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 export async function setSetting(key: string, value: string) {
-  await redis.set(`setting:${key}`, value, "EX", SETTING_TTL);
+  await redis.set(`setting:${key}`, value); // No TTL — settings persist indefinitely
 }
 
 export async function getAdminIds(): Promise<number[]> {
-  const raw = await redis.get("setting:admin_ids");
-  return raw ? JSON.parse(raw) : [];
+  const raw = await redis.smembers("setting:admin_ids");
+  return raw.map(Number);
 }
 
 export async function addAdminId(id: number) {
-  const ids = await getAdminIds();
-  if (!ids.includes(id)) ids.push(id);
-  await redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
+  await redis.sadd("setting:admin_ids", String(id));
 }
 
 export async function removeAdminId(id: number) {
-  const ids = await getAdminIds().then(list => list.filter(x => x !== id));
-  await redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
+  await redis.srem("setting:admin_ids", String(id));
 }
 
 // --- Conversational state ---

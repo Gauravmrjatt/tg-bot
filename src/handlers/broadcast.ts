@@ -1,9 +1,9 @@
 import { Context, Telegraf } from "telegraf";
 import { BroadcastModel, UserModel } from "../models/index.js";
 
-const BATCH_SIZE = 30; // Telegram rate limit: ~30 msg/sec
-const BATCH_DELAY_MS = 1500; // wait between batches to avoid flooding
-const CONCURRENT = 10; // max concurrent sends within a batch
+const BATCH_SIZE = 100; // Fetch 100 users per DB query
+const BATCH_DELAY_MS = 1000; // wait between batches
+const CONCURRENT = 25; // max concurrent sends within a batch
 
 // Process an array with limited concurrency
 async function processConcurrent<T, R>(

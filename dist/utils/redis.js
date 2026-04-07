@@ -30,7 +30,7 @@ async function connectRedis(url) {
     });
     console.log("Redis connected");
 }
-const SETTING_TTL = 3600; // 1h
+const AUTO_APPROVE_TTL = 3600; // 1h — cache TTL for auto_approve flag
 async function getAutoApprove() {
     const cached = await exports.redis.get("setting:auto_approve");
     if (cached !== null)
@@ -38,7 +38,7 @@ async function getAutoApprove() {
     return false;
 }
 async function setAutoApprove(value) {
-    await exports.redis.set("setting:auto_approve", value ? "1" : "0", "EX", SETTING_TTL);
+    await exports.redis.set("setting:auto_approve", value ? "1" : "0", "EX", AUTO_APPROVE_TTL);
 }
 async function cachePendingRequest(userId, data) {
     await exports.redis.set(`joinreq:${userId}`, JSON.stringify(data), "EX", 3600);
@@ -54,21 +54,17 @@ async function getSetting(key) {
     return exports.redis.get(`setting:${key}`);
 }
 async function setSetting(key, value) {
-    await exports.redis.set(`setting:${key}`, value, "EX", SETTING_TTL);
+    await exports.redis.set(`setting:${key}`, value); // No TTL — settings persist indefinitely
 }
 async function getAdminIds() {
-    const raw = await exports.redis.get("setting:admin_ids");
-    return raw ? JSON.parse(raw) : [];
+    const raw = await exports.redis.smembers("setting:admin_ids");
+    return raw.map(Number);
 }
 async function addAdminId(id) {
-    const ids = await getAdminIds();
-    if (!ids.includes(id))
-        ids.push(id);
-    await exports.redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
+    await exports.redis.sadd("setting:admin_ids", String(id));
 }
 async function removeAdminId(id) {
-    const ids = await getAdminIds().then(list => list.filter(x => x !== id));
-    await exports.redis.set("setting:admin_ids", JSON.stringify(ids), "EX", SETTING_TTL);
+    await exports.redis.srem("setting:admin_ids", String(id));
 }
 async function getAdminState(userId) {
     const data = await exports.redis.get(`adminstate:${userId}`);
