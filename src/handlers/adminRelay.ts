@@ -11,6 +11,30 @@ import { adminMainKeyboard, cancelKeyboard, esc } from "../utils/format.js";
 
 const PM = "Markdown" as const;
 
+async function showUserInfo(ctx: Context, targetUserId: number, replyFrom?: { first_name?: string; last_name?: string; username?: string; id?: number }) {
+  const user = await UserModel.findOne({ tgId: targetUserId });
+  const fn = esc(replyFrom?.first_name || user?.firstName || "N/A");
+  const ln = esc(replyFrom?.last_name || user?.lastName || "");
+  const un = esc(replyFrom?.username || user?.username || "N/A");
+  const id = replyFrom?.id || targetUserId;
+
+  let out = "👤 *User Info*\n\n";
+  out += `*Name:* ${fn}${ln ? " " + ln : ""}\n`;
+  out += `*Username:* @${un}\n`;
+  out += `*ID:* \`${id}\`\n`;
+  if (user) {
+    out += `\n*Joined:* ${(user as any).joinedAt.toISOString().slice(0, 10)}\n`;
+    const diff = Date.now() - (user as any).lastActiveAt.getTime();
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) out += `*Last Active:* ${sec}s ago\n`;
+    else if (sec < 3600) out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
+    else if (sec < 86400) out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
+    else out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
+    out += `*Admin:* ${(user as any).isAdmin ? "✅" : "❌"}\n`;
+  }
+  return ctx.reply(out, { parse_mode: PM });
+}
+
 export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
   // --- User message forwarding to admins ---
   bot.on("message", async (ctx, next) => {
@@ -19,12 +43,19 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     // Admin: check for reply to forwarded message OR interactive flow
     if (adminSet.has(ctx.from.id)) {
       const m = ctx.message as any;
-      const replyTo = m.reply_to_message as { message_id?: number } | undefined | null;
+      const replyTo = m.reply_to_message as { message_id?: number; from?: { id?: number; first_name?: string; last_name?: string; username?: string } } | undefined | null;
 
       // First priority: admin replying to a forwarded message
       if (replyTo?.message_id) {
         const userId = await getForwardedAdminUser(ctx.chat.id, replyTo.message_id);
         if (userId) {
+          // Check if admin is replying with /info — show user info instead of forwarding
+          const replyText = m.text || m.caption || "";
+          if (replyText === "/info" || replyText.startsWith("/info ")) {
+            await showUserInfo(ctx, userId, replyTo.from);
+            return;
+          }
+
           try {
             await bot.telegram.copyMessage(userId, ctx.chat.id, ctx.message.message_id);
             await ctx.reply(`✅ _Reply sent to user_ \`${userId}\``, { parse_mode: PM });
@@ -92,27 +123,7 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (!targetUserId && ctx.chat.type === "private") targetUserId = ctx.chat.id;
     if (!targetUserId) return;
 
-    const user = await UserModel.findOne({ tgId: targetUserId });
-    const fn = esc((m.reply_to_message?.from?.first_name as string) || user?.firstName || "N/A");
-    const ln = esc((m.reply_to_message?.from?.last_name as string) || user?.lastName || "");
-    const un = esc((m.reply_to_message?.from?.username as string) || user?.username || "N/A");
-    const id = (m.reply_to_message?.from?.id as number) || targetUserId;
-
-    let out = "👤 *User Info*\n\n";
-    out += `*Name:* ${fn}${ln ? " " + ln : ""}\n`;
-    out += `*Username:* @${un}\n`;
-    out += `*ID:* \`${id}\`\n`;
-    if (user) {
-      out += `\n*Joined:* ${(user as any).joinedAt.toISOString().slice(0, 10)}\n`;
-      const diff = Date.now() - (user as any).lastActiveAt.getTime();
-      const sec = Math.floor(diff / 1000);
-      if (sec < 60) out += `*Last Active:* ${sec}s ago\n`;
-      else if (sec < 3600) out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
-      else if (sec < 86400) out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
-      else out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
-      out += `*Admin:* ${(user as any).isAdmin ? "✅" : "❌"}\n`;
-    }
-    return ctx.reply(out, { parse_mode: PM });
+    await showUserInfo(ctx, targetUserId, m.reply_to_message?.from);
   });
 
   // --- /bcast command ---
