@@ -50,11 +50,29 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
       if (replyTo?.message_id) {
         const userId = await getForwardedAdminUser(ctx.chat.id, replyTo.message_id);
         if (userId) {
-          // Check if admin is replying with /info — show user info instead of forwarding
           const replyText = m.text || m.caption || "";
+
+          // Check for /info, /ban, /unban commands
           if (replyText === "/info" || replyText.startsWith("/info ")) {
             await showUserInfo(ctx, userId);
             return;
+          }
+          if (replyText === "/ban" || replyText.startsWith("/ban ")) {
+            if (adminSet.has(userId)) {
+              return ctx.reply("🚫 _Cannot ban an admin._", { parse_mode: PM });
+            }
+            const alreadyBanned = await isUserBanned(userId);
+            if (alreadyBanned) return ctx.reply(`⚠ _User_ \`${userId}\` _is already banned._`, { parse_mode: PM });
+            await banUser(userId);
+            await UserModel.updateOne({ tgId: userId }, { $set: { isBanned: true } }, { upsert: true });
+            return ctx.reply(`🚫 _User_ \`${userId}\` _has been banned._`, { parse_mode: PM });
+          }
+          if (replyText === "/unban" || replyText.startsWith("/unban ")) {
+            const banned = await isUserBanned(userId);
+            if (!banned) return ctx.reply(`⚠ _User_ \`${userId}\` _is not banned._`, { parse_mode: PM });
+            await unbanUser(userId);
+            await UserModel.updateOne({ tgId: userId }, { $set: { isBanned: false } });
+            return ctx.reply(`✅ _User_ \`${userId}\` _has been unbanned._`, { parse_mode: PM });
           }
 
           try {

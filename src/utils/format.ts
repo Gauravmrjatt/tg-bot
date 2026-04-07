@@ -10,9 +10,7 @@ export function esc(s: string): string {
 // User main keyboard — reply buttons at bottom
 export function userMainKeyboard() {
   return Markup.keyboard([
-    ["📋 Help"],
-    ["🔗 Rejoin", "👤 My Info"],
-    ["💬 Message Admin"],
+    ["🔗 Rejoin", "💬 Message Admin"],
   ]).resize();
 }
 

@@ -16,9 +16,7 @@ function esc(s) {
 // User main keyboard — reply buttons at bottom
 function userMainKeyboard() {
     return telegraf_1.Markup.keyboard([
-        ["📋 Help"],
-        ["🔗 Rejoin", "👤 My Info"],
-        ["💬 Message Admin"],
+        ["🔗 Rejoin", "💬 Message Admin"],
     ]).resize();
 }
 // Admin main keyboard

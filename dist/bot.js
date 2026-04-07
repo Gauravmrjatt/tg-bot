@@ -122,38 +122,12 @@ bot.start(async (ctx) => {
     return ctx.reply(greeting, { parse_mode: format_js_1.KB, reply_markup: kb.reply_markup });
 });
 // --- Non-command /admin: interactive keyboard buttons ---
-bot.hears("📋 Help", async (ctx) => {
-    let h = "📋 *Help*\n\n";
-    h += "*/rejoin* — Get the channel invite link\n";
-    h += "*💬 Message admin* — Just send me a message!\n\n";
-    h += "🔒 _Admin buttons available in control panel._";
-    await ctx.reply(h, { parse_mode: format_js_1.KB });
-});
 bot.hears("🔗 Rejoin", async (ctx) => {
     const inviteLink = await (0, redis_js_1.getSetting)("channel_link");
     if (!inviteLink) {
         return ctx.reply("🔗 _Invite link is not configured._", { parse_mode: format_js_1.KB });
     }
     return ctx.reply(`🔗 *Click to join:*\n\n${inviteLink}`, { parse_mode: format_js_1.KB });
-});
-bot.hears("👤 My Info", async (ctx) => {
-    const user = await index_js_1.UserModel.findOne({ tgId: ctx.from.id });
-    let out = "👤 *Your Info*\n\n";
-    out += `*ID:* \`${ctx.from.id}\`\n`;
-    out += `*Name:* ${(0, format_js_1.esc)(ctx.from.first_name)}${ctx.from.last_name ? " " + (0, format_js_1.esc)(ctx.from.last_name) : ""}\n`;
-    if (user) {
-        out += `\n*Joined:* ${user.joinedAt.toISOString().slice(0, 10)}\n`;
-        const sec = Math.floor((Date.now() - user.lastActiveAt.getTime()) / 1000);
-        if (sec < 60)
-            out += `*Last Active:* ${sec}s ago\n`;
-        else if (sec < 3600)
-            out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
-        else if (sec < 86400)
-            out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
-        else
-            out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
-    }
-    return ctx.reply(out, { parse_mode: format_js_1.KB });
 });
 bot.hears("💬 Message Admin", async (ctx) => {
     await ctx.reply("💬 _Just type your message and it will be forwarded to admins._", {
