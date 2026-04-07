@@ -50,13 +50,6 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
           status: "approved",
           actionAt: new Date(),
         });
-        for (const adminId of adminSet) {
-          try {
-            await bot.telegram.sendMessage(adminId, `✅ *Auto-approved* join request from _${safeName}_`, { parse_mode: "Markdown" });
-          } catch {
-            /* ignore */
-          }
-        }
       } catch (err) {
         console.error("Auto-approve failed:", err);
       }

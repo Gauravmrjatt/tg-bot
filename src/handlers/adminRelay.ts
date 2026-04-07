@@ -11,27 +11,27 @@ import { adminMainKeyboard, cancelKeyboard, esc } from "../utils/format.js";
 
 const PM = "Markdown" as const;
 
-async function showUserInfo(ctx: Context, targetUserId: number, replyFrom?: { first_name?: string; last_name?: string; username?: string; id?: number }) {
+async function showUserInfo(ctx: Context, targetUserId: number) {
   const user = await UserModel.findOne({ tgId: targetUserId });
-  const fn = esc(replyFrom?.first_name || user?.firstName || "N/A");
-  const ln = esc(replyFrom?.last_name || user?.lastName || "");
-  const un = esc(replyFrom?.username || user?.username || "N/A");
-  const id = replyFrom?.id || targetUserId;
+  if (!user) {
+    return ctx.reply(`👤 *User Info*\n\n*ID:* \`${targetUserId}\`\n\n⚠️ _User not found in database._`, { parse_mode: PM });
+  }
+  const fn = esc(user.firstName || "N/A");
+  const ln = esc(user.lastName || "");
+  const un = esc(user.username || "N/A");
 
   let out = "👤 *User Info*\n\n";
   out += `*Name:* ${fn}${ln ? " " + ln : ""}\n`;
   out += `*Username:* @${un}\n`;
-  out += `*ID:* \`${id}\`\n`;
-  if (user) {
-    out += `\n*Joined:* ${(user as any).joinedAt.toISOString().slice(0, 10)}\n`;
-    const diff = Date.now() - (user as any).lastActiveAt.getTime();
-    const sec = Math.floor(diff / 1000);
-    if (sec < 60) out += `*Last Active:* ${sec}s ago\n`;
-    else if (sec < 3600) out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
-    else if (sec < 86400) out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
-    else out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
-    out += `*Admin:* ${(user as any).isAdmin ? "✅" : "❌"}\n`;
-  }
+  out += `*ID:* \`${targetUserId}\`\n`;
+  out += `\n*Joined:* ${(user as any).joinedAt.toISOString().slice(0, 10)}\n`;
+  const diff = Date.now() - (user as any).lastActiveAt.getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) out += `*Last Active:* ${sec}s ago\n`;
+  else if (sec < 3600) out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
+  else if (sec < 86400) out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
+  else out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
+  out += `*Admin:* ${(user as any).isAdmin ? "✅" : "❌"}\n`;
   return ctx.reply(out, { parse_mode: PM });
 }
 
@@ -43,19 +43,12 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     // Admin: check for reply to forwarded message OR interactive flow
     if (adminSet.has(ctx.from.id)) {
       const m = ctx.message as any;
-      const replyTo = m.reply_to_message as { message_id?: number; from?: { id?: number; first_name?: string; last_name?: string; username?: string } } | undefined | null;
+      const replyTo = m.reply_to_message as { message_id?: number } | undefined | null;
 
       // First priority: admin replying to a forwarded message
       if (replyTo?.message_id) {
         const userId = await getForwardedAdminUser(ctx.chat.id, replyTo.message_id);
         if (userId) {
-          // Check if admin is replying with /info — show user info instead of forwarding
-          const replyText = m.text || m.caption || "";
-          if (replyText === "/info" || replyText.startsWith("/info ")) {
-            await showUserInfo(ctx, userId, replyTo.from);
-            return;
-          }
-
           try {
             await bot.telegram.copyMessage(userId, ctx.chat.id, ctx.message.message_id);
             await ctx.reply(`✅ _Reply sent to user_ \`${userId}\``, { parse_mode: PM });
@@ -115,6 +108,17 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (!ctx.from || !adminSet.has(ctx.from.id)) return;
     let targetUserId: number | undefined;
     const m = ctx.message as any;
+
+    // If replying to a forwarded message, resolve via Redis mapping
+    if (m.reply_to_message?.message_id) {
+      const fwdUserId = await getForwardedAdminUser(ctx.chat.id, m.reply_to_message.message_id);
+      if (fwdUserId) {
+        await showUserInfo(ctx, fwdUserId);
+        return;
+      }
+    }
+
+    // Fallback: use replied user ID or parse from command text
     if (m.reply_to_message?.from) targetUserId = m.reply_to_message.from.id;
     if (!targetUserId) {
       const txt = (ctx as any).message.text.slice("/info".length).trim();
@@ -123,7 +127,7 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (!targetUserId && ctx.chat.type === "private") targetUserId = ctx.chat.id;
     if (!targetUserId) return;
 
-    await showUserInfo(ctx, targetUserId, m.reply_to_message?.from);
+    await showUserInfo(ctx, targetUserId);
   });
 
   // --- /bcast command ---

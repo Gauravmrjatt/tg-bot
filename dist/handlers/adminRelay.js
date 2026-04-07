@@ -7,30 +7,30 @@ const settings_js_1 = require("../utils/settings.js");
 const broadcast_js_1 = require("./broadcast.js");
 const format_js_1 = require("../utils/format.js");
 const PM = "Markdown";
-async function showUserInfo(ctx, targetUserId, replyFrom) {
+async function showUserInfo(ctx, targetUserId) {
     const user = await index_js_1.UserModel.findOne({ tgId: targetUserId });
-    const fn = (0, format_js_1.esc)(replyFrom?.first_name || user?.firstName || "N/A");
-    const ln = (0, format_js_1.esc)(replyFrom?.last_name || user?.lastName || "");
-    const un = (0, format_js_1.esc)(replyFrom?.username || user?.username || "N/A");
-    const id = replyFrom?.id || targetUserId;
+    if (!user) {
+        return ctx.reply(`👤 *User Info*\n\n*ID:* \`${targetUserId}\`\n\n⚠️ _User not found in database._`, { parse_mode: PM });
+    }
+    const fn = (0, format_js_1.esc)(user.firstName || "N/A");
+    const ln = (0, format_js_1.esc)(user.lastName || "");
+    const un = (0, format_js_1.esc)(user.username || "N/A");
     let out = "👤 *User Info*\n\n";
     out += `*Name:* ${fn}${ln ? " " + ln : ""}\n`;
     out += `*Username:* @${un}\n`;
-    out += `*ID:* \`${id}\`\n`;
-    if (user) {
-        out += `\n*Joined:* ${user.joinedAt.toISOString().slice(0, 10)}\n`;
-        const diff = Date.now() - user.lastActiveAt.getTime();
-        const sec = Math.floor(diff / 1000);
-        if (sec < 60)
-            out += `*Last Active:* ${sec}s ago\n`;
-        else if (sec < 3600)
-            out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
-        else if (sec < 86400)
-            out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
-        else
-            out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
-        out += `*Admin:* ${user.isAdmin ? "✅" : "❌"}\n`;
-    }
+    out += `*ID:* \`${targetUserId}\`\n`;
+    out += `\n*Joined:* ${user.joinedAt.toISOString().slice(0, 10)}\n`;
+    const diff = Date.now() - user.lastActiveAt.getTime();
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60)
+        out += `*Last Active:* ${sec}s ago\n`;
+    else if (sec < 3600)
+        out += `*Last Active:* ${Math.floor(sec / 60)}m ago\n`;
+    else if (sec < 86400)
+        out += `*Last Active:* ${Math.floor(sec / 3600)}h ago\n`;
+    else
+        out += `*Last Active:* ${Math.floor(sec / 86400)}d ago\n`;
+    out += `*Admin:* ${user.isAdmin ? "✅" : "❌"}\n`;
     return ctx.reply(out, { parse_mode: PM });
 }
 function setupAdminRelay(bot, adminSet) {
@@ -46,12 +46,6 @@ function setupAdminRelay(bot, adminSet) {
             if (replyTo?.message_id) {
                 const userId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, replyTo.message_id);
                 if (userId) {
-                    // Check if admin is replying with /info — show user info instead of forwarding
-                    const replyText = m.text || m.caption || "";
-                    if (replyText === "/info" || replyText.startsWith("/info ")) {
-                        await showUserInfo(ctx, userId, replyTo.from);
-                        return;
-                    }
                     try {
                         await bot.telegram.copyMessage(userId, ctx.chat.id, ctx.message.message_id);
                         await ctx.reply(`✅ _Reply sent to user_ \`${userId}\``, { parse_mode: PM });
@@ -109,6 +103,15 @@ function setupAdminRelay(bot, adminSet) {
             return;
         let targetUserId;
         const m = ctx.message;
+        // If replying to a forwarded message, resolve via Redis mapping
+        if (m.reply_to_message?.message_id) {
+            const fwdUserId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, m.reply_to_message.message_id);
+            if (fwdUserId) {
+                await showUserInfo(ctx, fwdUserId);
+                return;
+            }
+        }
+        // Fallback: use replied user ID or parse from command text
         if (m.reply_to_message?.from)
             targetUserId = m.reply_to_message.from.id;
         if (!targetUserId) {
@@ -123,7 +126,7 @@ function setupAdminRelay(bot, adminSet) {
             targetUserId = ctx.chat.id;
         if (!targetUserId)
             return;
-        await showUserInfo(ctx, targetUserId, m.reply_to_message?.from);
+        await showUserInfo(ctx, targetUserId);
     });
     // --- /bcast command ---
     bot.command("bcast", async (ctx) => {
