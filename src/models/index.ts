@@ -42,6 +42,9 @@ export const JoinRequestModel =
 export const BroadcastSchema = new mongoose.Schema({
   messageId: { type: String, required: true, unique: true },
   text: String,
+  photoFileId: String, // Telegram file_id for reuse across sends
+  buttonText: String,
+  buttonUrl: String,
   sentAt: { type: Date, default: Date.now },
   totalTargeted: { type: Number, default: 0 },
   delivered: { type: Number, default: 0 },

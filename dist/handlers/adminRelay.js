@@ -273,15 +273,69 @@ async function handleAdminFlow(bot, ctx, state, adminSet) {
             });
         }
         case "broadcast": {
-            if (!text.trim()) {
-                return ctx.reply("❌ Message cannot be empty. Send your broadcast text:", {
+            const m = ctx.message;
+            const data = state.data;
+            // Step 1: Receive message (text or photo)
+            if (!data?.text && !data?.photoFileId) {
+                const photo = m.photo?.[m.photo.length - 1];
+                const caption = m.caption || "";
+                if (photo) {
+                    // Photo broadcast
+                    await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: caption, photoFileId: photo.file_id } });
+                    return ctx.reply("📸 *Photo received.*\n\n_Send button text (or type *skip* to send without a button):_", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (!text.trim()) {
+                    return ctx.reply("❌ Send a photo with caption, or type text message:", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                // Text broadcast
+                await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: text } });
+                return ctx.reply("📝 *Text received.*\n\n_Send button text (or type *skip* to send without a button):_", {
                     parse_mode: PM,
                     reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
                 });
             }
+            // Step 2: Receive button text
+            if (data?.step === "ask_button_text") {
+                if (text.toLowerCase() === "skip") {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId });
+                    return;
+                }
+                await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { ...data, step: "ask_button_url", buttonText: text } });
+                return ctx.reply("🔗 _Now send the button URL:_", {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                });
+            }
+            // Step 3: Receive button URL
+            if (data?.step === "ask_button_url") {
+                if (text.toLowerCase() === "skip") {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId, buttonText: data.buttonText });
+                    return;
+                }
+                if (!text.startsWith("http://") && !text.startsWith("https://")) {
+                    return ctx.reply("❌ Invalid URL. Must start with http:// or https://:", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                await (0, redis_js_1.clearAdminState)(uid);
+                await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId, buttonText: data.buttonText, buttonUrl: text });
+                return;
+            }
+            // Fallback
             await (0, redis_js_1.clearAdminState)(uid);
-            await (0, broadcast_js_1.runBroadcast)(bot, ctx, text);
-            break;
+            return ctx.reply("⚠ _Broadcast session expired. Please try again._", {
+                parse_mode: PM,
+                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+            });
         }
         case "bcast_status": {
             const bid = text.trim();

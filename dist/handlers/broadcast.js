@@ -3,10 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runBroadcast = runBroadcast;
 exports.setupBroadcast = setupBroadcast;
 const index_js_1 = require("../models/index.js");
-const BATCH_SIZE = 100; // Fetch 100 users per DB query
-const BATCH_DELAY_MS = 1000; // wait between batches
-const CONCURRENT = 25; // max concurrent sends within a batch
-// Process an array with limited concurrency
+const BATCH_SIZE = 100;
+const BATCH_DELAY_MS = 1000;
+const CONCURRENT = 25;
 async function processConcurrent(items, concurrency, fn) {
     const results = new Array(items.length);
     let idx = 0;
@@ -19,18 +18,30 @@ async function processConcurrent(items, concurrency, fn) {
     await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
     return results;
 }
-// Telegram API helper: respects 429 rate limits
-async function sendMessageWithRetry(bot, userId, text, maxRetries = 2) {
+async function sendBroadcastWithRetry(bot, userId, payload, maxRetries = 2) {
     let retries = 0;
     while (true) {
         try {
-            await bot.telegram.sendMessage(userId, text);
+            if (payload.photoFileId) {
+                const kb = payload.buttonText && payload.buttonUrl
+                    ? { inline_keyboard: [[{ text: payload.buttonText, url: payload.buttonUrl }]] }
+                    : undefined;
+                await bot.telegram.sendPhoto(userId, payload.photoFileId, {
+                    caption: payload.text || undefined,
+                    reply_markup: kb,
+                });
+            }
+            else {
+                const kb = payload.buttonText && payload.buttonUrl
+                    ? { inline_keyboard: [[{ text: payload.buttonText, url: payload.buttonUrl }]] }
+                    : undefined;
+                await bot.telegram.sendMessage(userId, payload.text, { reply_markup: kb });
+            }
             return "delivered";
         }
         catch (err) {
             const desc = err.response?.description || err.message || "";
             const lower = desc.toLowerCase();
-            // Handle 429 rate limiting
             if (lower.includes("too many requests") || lower.includes("429")) {
                 const match = desc.match(/retry after[: ]+(\d+)/i);
                 const retryAfter = match ? parseInt(match[1], 10) : 5;
@@ -40,7 +51,6 @@ async function sendMessageWithRetry(bot, userId, text, maxRetries = 2) {
                     await new Promise((r) => setTimeout(r, delay));
                     continue;
                 }
-                // Max retries hit — count as failed
                 return "failed";
             }
             if (lower.includes("blocked") || lower.includes("deactivated") || lower.includes("forbidden")) {
@@ -50,15 +60,14 @@ async function sendMessageWithRetry(bot, userId, text, maxRetries = 2) {
         }
     }
 }
-// Shared broadcast state
 let activeBroadcast = null;
-async function runBroadcast(bot, ctx, text) {
+async function runBroadcast(bot, ctx, payload) {
     const adminSet = bot.__adminSet;
     if (!ctx.from || !adminSet.has(ctx.from.id)) {
         await ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
         return;
     }
-    if (!text.trim()) {
+    if (!payload.text.trim() && !payload.photoFileId) {
         await ctx.reply("❌ _Message cannot be empty._", { parse_mode: "Markdown" });
         return;
     }
@@ -67,15 +76,19 @@ async function runBroadcast(bot, ctx, text) {
         return;
     }
     const broadcastId = `bc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    await index_js_1.BroadcastModel.create({ messageId: broadcastId, text });
+    await index_js_1.BroadcastModel.create({
+        messageId: broadcastId,
+        text: payload.text,
+        photoFileId: payload.photoFileId,
+        buttonText: payload.buttonText,
+        buttonUrl: payload.buttonUrl,
+    });
     const totalUsers = await index_js_1.UserModel.countDocuments();
     if (totalUsers === 0) {
         await ctx.reply("📢 _No users to broadcast to._", { parse_mode: "Markdown" });
         return;
     }
     await index_js_1.BroadcastModel.updateOne({ messageId: broadcastId }, { totalTargeted: totalUsers });
-    // Track progress
-    let delivered = 0, failed = 0, blocked = 0;
     activeBroadcast = { broadcastId, delivered: 0, failed: 0, blocked: 0 };
     await ctx.reply(`📢 *Broadcasting* to ${totalUsers} users...\n\n🆔 ID: \`${broadcastId}\``, { parse_mode: "Markdown" });
     let processed = 0;
@@ -89,9 +102,7 @@ async function runBroadcast(bot, ctx, text) {
         if (users.length === 0)
             break;
         lastId = String(users[users.length - 1]._id);
-        const results = await processConcurrent(users, CONCURRENT, async (user) => {
-            return sendMessageWithRetry(bot, user.tgId, text);
-        });
+        const results = await processConcurrent(users, CONCURRENT, async (user) => sendBroadcastWithRetry(bot, user.tgId, payload));
         for (const r of results) {
             if (r === "delivered")
                 activeBroadcast.delivered++;
@@ -114,14 +125,6 @@ async function runBroadcast(bot, ctx, text) {
     await ctx.reply(`📢 *Broadcast Complete*\n\n🟢 Delivered: *${d}*\n🔴 Failed: *${f}*\n🚫 Blocked: *${b}*\n📊 Total: *${totalUsers}*`, { parse_mode: "Markdown" });
 }
 function setupBroadcast(bot, adminSet) {
-    bot.command("broadcast", async (ctx) => {
-        if (!ctx.from || !adminSet.has(ctx.from.id))
-            return ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
-        const text = ctx.message.text.slice("/broadcast".length).trim();
-        if (!text)
-            return ctx.reply("Usage: `/broadcast <message>`", { parse_mode: "Markdown" });
-        return runBroadcast(bot, ctx, text);
-    });
     bot.command("bcast", async (ctx) => {
         if (!ctx.from || !adminSet.has(ctx.from.id))
             return ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
@@ -135,6 +138,9 @@ function setupBroadcast(bot, adminSet) {
         msg += `*Status:* _${bc.status}_\n`;
         msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
         msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
+        if (bc.buttonText && bc.buttonUrl) {
+            msg += `\n🔗 *Button:* [${bc.buttonText}](${bc.buttonUrl})`;
+        }
         return ctx.reply(msg, { parse_mode: "Markdown" });
     });
 }

@@ -1,11 +1,10 @@
 import { Context, Telegraf } from "telegraf";
 import { BroadcastModel, UserModel } from "../models/index.js";
 
-const BATCH_SIZE = 100; // Fetch 100 users per DB query
-const BATCH_DELAY_MS = 1000; // wait between batches
-const CONCURRENT = 25; // max concurrent sends within a batch
+const BATCH_SIZE = 100;
+const BATCH_DELAY_MS = 1000;
+const CONCURRENT = 25;
 
-// Process an array with limited concurrency
 async function processConcurrent<T, R>(
   items: T[],
   concurrency: number,
@@ -27,24 +26,42 @@ async function processConcurrent<T, R>(
   return results;
 }
 
-// Telegram API helper: respects 429 rate limits
-async function sendMessageWithRetry(
+type BroadcastPayload = {
+  text: string;
+  photoFileId?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+};
+
+async function sendBroadcastWithRetry(
   bot: Telegraf<Context>,
   userId: number,
-  text: string,
+  payload: BroadcastPayload,
   maxRetries = 2,
 ): Promise<"delivered" | "failed" | "blocked"> {
   let retries = 0;
 
   while (true) {
     try {
-      await bot.telegram.sendMessage(userId, text);
+      if (payload.photoFileId) {
+        const kb = payload.buttonText && payload.buttonUrl
+          ? { inline_keyboard: [[{ text: payload.buttonText, url: payload.buttonUrl }]] }
+          : undefined;
+        await bot.telegram.sendPhoto(userId, payload.photoFileId, {
+          caption: payload.text || undefined,
+          reply_markup: kb,
+        });
+      } else {
+        const kb = payload.buttonText && payload.buttonUrl
+          ? { inline_keyboard: [[{ text: payload.buttonText, url: payload.buttonUrl }]] }
+          : undefined;
+        await bot.telegram.sendMessage(userId, payload.text, { reply_markup: kb });
+      }
       return "delivered";
     } catch (err: any) {
       const desc = err.response?.description || err.message || "";
       const lower = desc.toLowerCase();
 
-      // Handle 429 rate limiting
       if (lower.includes("too many requests") || lower.includes("429")) {
         const match = desc.match(/retry after[: ]+(\d+)/i);
         const retryAfter = match ? parseInt(match[1], 10) : 5;
@@ -55,7 +72,6 @@ async function sendMessageWithRetry(
           await new Promise((r) => setTimeout(r, delay));
           continue;
         }
-        // Max retries hit — count as failed
         return "failed";
       }
 
@@ -67,16 +83,19 @@ async function sendMessageWithRetry(
   }
 }
 
-// Shared broadcast state
 let activeBroadcast: { broadcastId: string; delivered: number; failed: number; blocked: number } | null = null;
 
-export async function runBroadcast(bot: Telegraf<Context>, ctx: Context, text: string): Promise<void> {
+export async function runBroadcast(
+  bot: Telegraf<Context>,
+  ctx: Context,
+  payload: BroadcastPayload,
+): Promise<void> {
   const adminSet = (bot as any).__adminSet as Set<number>;
   if (!ctx.from || !adminSet.has(ctx.from.id)) {
     await ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
     return;
   }
-  if (!text.trim()) {
+  if (!payload.text.trim() && !payload.photoFileId) {
     await ctx.reply("❌ _Message cannot be empty._", { parse_mode: "Markdown" });
     return;
   }
@@ -86,7 +105,13 @@ export async function runBroadcast(bot: Telegraf<Context>, ctx: Context, text: s
   }
 
   const broadcastId = `bc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  await BroadcastModel.create({ messageId: broadcastId, text });
+  await BroadcastModel.create({
+    messageId: broadcastId,
+    text: payload.text,
+    photoFileId: payload.photoFileId,
+    buttonText: payload.buttonText,
+    buttonUrl: payload.buttonUrl,
+  });
 
   const totalUsers = await UserModel.countDocuments();
   if (totalUsers === 0) {
@@ -96,8 +121,6 @@ export async function runBroadcast(bot: Telegraf<Context>, ctx: Context, text: s
 
   await BroadcastModel.updateOne({ messageId: broadcastId }, { totalTargeted: totalUsers });
 
-  // Track progress
-  let delivered = 0, failed = 0, blocked = 0;
   activeBroadcast = { broadcastId, delivered: 0, failed: 0, blocked: 0 };
 
   await ctx.reply(`📢 *Broadcasting* to ${totalUsers} users...\n\n🆔 ID: \`${broadcastId}\``, { parse_mode: "Markdown" });
@@ -118,9 +141,7 @@ export async function runBroadcast(bot: Telegraf<Context>, ctx: Context, text: s
     const results = await processConcurrent(
       users,
       CONCURRENT,
-      async (user) => {
-        return sendMessageWithRetry(bot, user.tgId, text);
-      },
+      async (user) => sendBroadcastWithRetry(bot, user.tgId, payload),
     );
 
     for (const r of results) {
@@ -157,13 +178,6 @@ export async function runBroadcast(bot: Telegraf<Context>, ctx: Context, text: s
 }
 
 export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
-  bot.command("broadcast", async (ctx) => {
-    if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
-    const text = ctx.message.text.slice("/broadcast".length).trim();
-    if (!text) return ctx.reply("Usage: `/broadcast <message>`", { parse_mode: "Markdown" });
-    return runBroadcast(bot, ctx, text);
-  });
-
   bot.command("bcast", async (ctx) => {
     if (!ctx.from || !adminSet.has(ctx.from.id)) return ctx.reply("🛡️ _Admin only._", { parse_mode: "Markdown" });
     const id = ctx.message.text.slice("/bcast".length).trim();
@@ -176,6 +190,9 @@ export function setupBroadcast(bot: Telegraf<Context>, adminSet: Set<number>) {
     msg += `*Status:* _${bc.status}_\n`;
     msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
     msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
+    if (bc.buttonText && bc.buttonUrl) {
+      msg += `\n🔗 *Button:* [${bc.buttonText}](${bc.buttonUrl})`;
+    }
     return ctx.reply(msg, { parse_mode: "Markdown" });
   });
 }

@@ -40,6 +40,9 @@ exports.JoinRequestModel = mongoose_1.default.models.JoinRequest ||
 exports.BroadcastSchema = new mongoose_1.default.Schema({
     messageId: { type: String, required: true, unique: true },
     text: String,
+    photoFileId: String, // Telegram file_id for reuse across sends
+    buttonText: String,
+    buttonUrl: String,
     sentAt: { type: Date, default: Date.now },
     totalTargeted: { type: Number, default: 0 },
     delivered: { type: Number, default: 0 },
