@@ -6,18 +6,23 @@ A Telegram bot written in TypeScript (Telegraf + Express) with webhook support, 
 
 - **Join Request Approval** — User requests to join a private channel, admins get Approve/Decline inline buttons. Redis-backed for instant response.
 - **Auto-Approve Mode** — Admin toggles via `/autoapprove`. When ON, join requests are approved automatically (still logged for audit).
-- **Broadcast with Delivery Tracking** — Send messages to all users with delivered/failed/blocked counters. Check status anytime with `/bcast <id>`.
-- **Admin Relay** — Users DM the bot, message forwards to all admins. User gets confirmation. Admin replies by directly replying to the forwarded message in Telegram (or use `/reply <userId> <message>`).
-- **Stats Dashboard** — `/stats` shows user count, join request history, and broadcast delivery rates.
-- **User Tracking** — Every interacting user is persisted in MongoDB automatically.
+- **Broadcast with Delivery Tracking** — Rate-limited batch sending with `retry_after` handling. Delivered/failed/blocked counters. Check status with `/bcast <id>`.
+- **Admin Relay** — Users DM the bot, ALL message types (text, photos, docs, video, audio, stickers, polls) are forwarded to admins. Admin replies directly by tapping "reply" on the forwarded message.
+- **Inline Keyboards** — Users see basic menu (Help, Rejoin, My Info, Message Admin). Admins see full control panel (Broadcast, Stats, Admin Management, Config).
+- **Admin Management** — Add/remove admins at runtime. `/addadmin <userId>` (or reply to a message), `/removeadmin <userId>`, `/listadmins`.
+- **User Info** — `/info` shows name, username, ID, join date, last active, admin status.
+- **Stats Dashboard** — `/stats` shows user count, join request history, broadcast delivery rates.
+- **User Tracking** — Every interacting user persists in MongoDB automatically.
+- **Runtime Config** — Channel ID, invite link set via commands. Stored in both DB and Redis.
 
 ## Performance Optimizations
 
-- **Redis caching** — Auto-approve setting and pending requests cached (sub-ms lookups vs MongoDB queries)
-- **Concurrent broadcast** — Up to 50 simultaneous Telegram API requests instead of serial sending
-- **Non-blocking user tracking** — Database writes don't block message handling
-- **Rate limiting** — Max 1000 requests/minute on the webhook endpoint
-- **Webhook secret validation** — Optional `WEBHOOK_SECRET` env var to reject unauthorized requests
+- **Redis caching** — Settings and pending requests cached with 1h TTL (auto-renewed on update)
+- **Cursor-based pagination** — Broadcast reads users in small batches, never loads all users into memory
+- **Rate-limited broadcast** — 10 concurrent sends with 1.5s batch delays, plus automatic `retry_after` handling for Telegram 429 responses
+- **Non-blocking user tracking** — Database writes are fire-and-forget, never block message handling
+- **Duplicate broadcast protection** — Only one broadcast runs at a time
+- **Concurrent join request handling** — Admin approve/decline reads from Redis cache (sub-ms) with MongoDB fallback
 
 ## Quick Start
 
@@ -55,7 +60,7 @@ After the bot starts, configure these with admin commands (stored in DB + Redis)
 | `/setchannellink https://...` | Set the invite link for `/rejoin` |
 | `/config` | View current config |
 
-### 3. Run with Docker
+### 4. Run with Docker
 
 ```bash
 docker compose up -d
@@ -63,7 +68,7 @@ docker compose up -d
 
 This starts MongoDB, Redis, and the bot.
 
-### 4. Run Locally
+### 5. Run Locally
 
 ```bash
 # Start MongoDB and Redis manually first, then:
@@ -80,12 +85,13 @@ npm run dev
 
 ### For Users
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Get a welcome message |
-| `/help` | List available commands |
+| Command / Action | Description |
+|------------------|-------------|
+| `/start` | Shows welcome message with inline keyboard menu |
 | `/rejoin` | Get the channel invite link |
-| *(any DM)* | Send a message to admins. You'll get a confirmation reply. |
+| *(any DM)* | Send ANY message type (text, photo, doc, video, audio, sticker, poll) — it gets forwarded to admins |
+| 🔘 **Keyboard**: Help, Rejoin, My Info, Message Admin | Inline buttons shown on `/start` |
+| `?` | *(any DM)* | Send a message to admins. You'll get a confirmation reply. |
 
 ### For Admins
 
@@ -96,6 +102,10 @@ npm run dev
 | `/bcast <id>` | Check delivery status of a broadcast |
 | `/stats` | View bot statistics |
 | `/reply <userId> <message>` | Reply to a user who messaged the bot |
+| `/info` | View user info (name, username, ID, join date, etc.) |
+| `/addadmin <userId>` | Add a user as admin (or reply to a message with `/addadmin`) |
+| `/removeadmin <userId>` | Remove an admin |
+| `/listadmins` | List all current admins |
 | `/setchannelid <id>` | Set the private channel chat ID |
 | `/setchannellink <url>` | Set the invite link for `/rejoin` |
 | `/config` | View current runtime configuration |
@@ -103,17 +113,8 @@ npm run dev
 ### Admin Inline Actions
 
 - **Join requests**: Approve/Decline buttons sent to admins
-- **User DMs**: Admins can reply directly to the forwarded message in Telegram (no command needed)
-
-### Admin Inline Actions
-
-When a join request comes in, admins receive a message with:
-
-```
-[Approve] [Decline]
-```
-
-Clicking either updates the request instantly.
+- **User DMs**: Admin reply by directly tapping "reply" on the forwarded message (preserves ALL message types: text, photo, doc, video, audio, sticker, poll)
+- **Menu**: `/start` shows full admin inline keyboard with Broadcast, Stats, Auto Approve, Admin Management, Config, and Channel settings buttons
 
 ## Broadcast Flow
 
@@ -126,15 +127,18 @@ Clicking either updates the request instantly.
 
 ```
 src/
-  bot.ts              - Entry point, Express webhook, middleware
+  bot.ts              - Entry point, Express webhook, middleware, admin management
   models/
     index.ts          - Mongoose schemas (User, JoinRequest, Broadcast, GlobalSettings)
   handlers/
-    joinRequest.ts    - Join request approval flow
-    broadcast.ts      - Broadcast with delivery tracking
-    adminRelay.ts     - User-to-admin message relay
+    joinRequest.ts    - Join request approval flow (with Redis caching)
+    broadcast.ts      - Broadcast with rate limiting, retry_after, cursor pagination
+    adminRelay.ts     - User-to-admin message relay (all message types + reply)
     stats.ts          - Stats dashboard commands
+    menu.ts           - Inline keyboard handlers (user + admin menus)
   utils/
     db.ts             - MongoDB connection
-    redis.ts          - Redis connection + caching helpers
+    redis.ts          - Redis connection + caching helpers (settings, admins, tracking)
+    settings.ts       - getTargetChatId, setTargetChatId, get/set channel link
+    format.ts         - Inline keyboard builders (user/admin keyboards)
 ```
