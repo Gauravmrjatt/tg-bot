@@ -253,18 +253,50 @@ bot.hears("✅ Unban User", async (ctx) => {
 bot.hears("📋 List Banned", async (ctx) => {
     if (!AdminSet.has(ctx.from.id))
         return;
+    return showBannedList(ctx, 1);
+});
+async function showBannedList(ctx, page) {
     const { UserModel } = await Promise.resolve().then(() => __importStar(require("./models/index.js")));
-    const banned = await UserModel.find({ isBanned: true }, { tgId: 1, username: 1, firstName: 1, lastName: 1 }).lean();
-    if (banned.length === 0) {
+    const { Markup } = await Promise.resolve().then(() => __importStar(require("telegraf")));
+    const perPage = 10;
+    const total = await UserModel.countDocuments({ isBanned: true });
+    if (total === 0) {
         return ctx.reply("📋 _No banned users._", { parse_mode: format_js_1.KB });
     }
-    let msg = `🚫 *Banned Users* (${banned.length}):\n\n`;
+    const totalPages = Math.ceil(total / perPage);
+    if (page > totalPages)
+        page = totalPages;
+    if (page < 1)
+        page = 1;
+    const banned = await UserModel.find({ isBanned: true }, { tgId: 1, username: 1, firstName: 1, lastName: 1 })
+        .sort({ _id: 1 })
+        .skip((page - 1) * perPage)
+        .limit(perPage)
+        .lean();
+    let msg = `🚫 *Banned Users* (${total})\n`;
+    msg += `*Page* ${page}/${totalPages}\n\n`;
     for (const u of banned) {
         const name = `${u.firstName || ""} ${u.lastName || ""}`.trim() || "N/A";
         const un = u.username ? `@${u.username}` : "no username";
         msg += `• \`${u.tgId}\` — ${name} (${un})\n`;
     }
-    return ctx.reply(msg, { parse_mode: format_js_1.KB });
+    const kb = [];
+    if (page > 1 || page < totalPages) {
+        const row = [];
+        if (page > 1)
+            row.push(Markup.button.callback("⬅️ Prev", `banned_list:${page - 1}`));
+        if (page < totalPages)
+            row.push(Markup.button.callback("Next ➡️", `banned_list:${page + 1}`));
+        kb.push(row);
+    }
+    return ctx.reply(msg, { parse_mode: format_js_1.KB, reply_markup: { inline_keyboard: kb } });
+}
+bot.action(/^banned_list:(\d+)$/, async (ctx) => {
+    if (!AdminSet.has(ctx.callbackQuery.from.id))
+        return ctx.answerCbQuery("Not authorized.");
+    const page = parseInt(ctx.match[1], 10);
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    await showBannedList(ctx, page);
 });
 bot.hears("❌ Cancel", async (ctx) => {
     const { clearAdminState } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
