@@ -7,6 +7,7 @@ import { connectDb } from "./utils/db.js";
 import { connectRedis, getSetting, getAdminIds, addAdminId, removeAdminId } from "./utils/redis.js";
 import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
+import { setupAdminRelay } from "./handlers/adminRelay.js";
 import { getTargetChatId, setTargetChatId, setChannelLink } from "./utils/settings.js";
 import { adminMainKeyboard, userMainKeyboard, removeKeyboard, cancelKeyboard, KB } from "./utils/format.js";
 
@@ -298,21 +299,21 @@ bot.command("autoapprove", async (ctx) => {
   return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: KB });
 });
 
-// Setup feature handlers (called inside main() after async imports resolve)
+// Setup feature handlers
 function setup(bot: any, AdminSet: Set<number>) {
   setupJoinRequest(bot, AdminSet);
-  import("./handlers/adminRelay.js").then(({ setupAdminRelay }) => {
-    setupAdminRelay(bot, AdminSet);
-  });
+  setupAdminRelay(bot, AdminSet);
 }
 
 // --- Express server ---
 async function main() {
   await connectDb(MONGO_URI!);
   logger.info("MongoDB connected");
-  setup(bot, AdminSet);
   await connectRedis(REDIS_URL);
   await loadAdmins();
+
+  // Register admin relay FIRST so it processes messages before other handlers
+  setup(bot, AdminSet);
 
   await bot.telegram.setWebhook(`${WEBHOOK_URL}${WEBHOOK_PATH}`);
 
@@ -339,3 +340,4 @@ main().catch((err) => {
   logger.fatal(err);
   process.exit(1);
 });
+ 
