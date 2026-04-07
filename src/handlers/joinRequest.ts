@@ -2,6 +2,7 @@ import { Context, Markup, Telegraf } from "telegraf";
 import { UserModel, JoinRequestModel, GlobalSettingsModel } from "../models/index.js";
 import { getAutoApprove, setAutoApprove, cachePendingRequest, getPendingRequest, removePendingRequest } from "../utils/redis.js";
 import { getTargetChatId } from "../utils/settings.js";
+import { esc } from "../utils/format.js";
 
 export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) {
   // Admin only — toggle global auto-approve (default OFF)
@@ -40,7 +41,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
       { upsert: true },
     );
 
-    const name = `${user.first_name}${user.last_name ? " " + user.last_name : ""}${user.username ? " (@" + user.username + ")" : ""}`;
+    const safeName = esc(`${user.first_name}${user.last_name ? " " + user.last_name : ""}${user.username ? " (@" + user.username + ")" : ""}`);
 
     if (globalAuto) {
       try {
@@ -58,7 +59,7 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
         });
         for (const adminId of adminSet) {
           try {
-            await bot.telegram.sendMessage(adminId, `✅ *Auto-approved* join request from _${name}_`, { parse_mode: "Markdown" });
+            await bot.telegram.sendMessage(adminId, `✅ *Auto-approved* join request from _${safeName}_`, { parse_mode: "Markdown" });
           } catch {
             /* ignore */
           }
@@ -81,7 +82,8 @@ export function setupJoinRequest(bot: Telegraf<Context>, adminSet: Set<number>) 
       ]);
       for (const adminId of adminSet) {
         try {
-          const msg = await bot.telegram.sendMessage(adminId, `📨 *Join Request*\n\n*Name:* _${name}_\n*Chat ID:* \`${joinReq.chat.id}\``, {
+          const msg = await bot.telegram.sendMessage(adminId, `📨 *Join Request*\n\n*Name:* _${safeName}_\n*Chat ID:* \`${joinReq.chat.id}\``, {
+            parse_mode: "Markdown",
             reply_markup: kb.reply_markup,
           });
           await JoinRequestModel.create({

@@ -9,7 +9,7 @@ import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
 import { getTargetChatId, setTargetChatId, setChannelLink } from "./utils/settings.js";
-import { adminMainKeyboard, userMainKeyboard, removeKeyboard, cancelKeyboard, KB } from "./utils/format.js";
+import { adminMainKeyboard, userMainKeyboard, removeKeyboard, cancelKeyboard, KB, esc } from "./utils/format.js";
 
 dotenv.config();
 
@@ -98,7 +98,7 @@ bot.hears("👤 My Info", async (ctx) => {
   const user = await UserModel.findOne({ tgId: ctx.from.id });
   let out = "👤 *Your Info*\n\n";
   out += `*ID:* \`${ctx.from.id}\`\n`;
-  out += `*Name:* ${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}\n`;
+  out += `*Name:* ${esc(ctx.from.first_name)}${ctx.from.last_name ? " " + esc(ctx.from.last_name) : ""}\n`;
   if (user) {
     out += `\n*Joined:* ${user.joinedAt.toISOString().slice(0, 10)}\n`;
     const sec = Math.floor((Date.now() - user.lastActiveAt.getTime()) / 1000);

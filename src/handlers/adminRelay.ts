@@ -7,7 +7,7 @@ import {
 import { UserModel, BroadcastModel } from "../models/index.js";
 import { setTargetChatId, setChannelLink } from "../utils/settings.js";
 import { runBroadcast } from "./broadcast.js";
-import { adminMainKeyboard, cancelKeyboard } from "../utils/format.js";
+import { adminMainKeyboard, cancelKeyboard, esc } from "../utils/format.js";
 
 const PM = "Markdown" as const;
 
@@ -53,7 +53,6 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (m2.text && m2.text.startsWith("/")) return next();
 
     const userId = ctx.from.id;
-    const esc = (s: string) => s.replace(/([_*`\[\]()~>#+\-=|{}.!\\])/g, "\\$1");
     const safeName = esc(`${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}${ctx.from.username ? " (@" + ctx.from.username + ")" : ""}`);
     const adminIdsArray = Array.from(adminSet);
 
@@ -96,9 +95,9 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     if (!targetUserId) return;
 
     const user = await UserModel.findOne({ tgId: targetUserId });
-    const fn = (m.reply_to_message?.from?.first_name as string) || user?.firstName || "N/A";
-    const ln = (m.reply_to_message?.from?.last_name as string) || user?.lastName || "";
-    const un = (m.reply_to_message?.from?.username as string) || user?.username || "N/A";
+    const fn = esc((m.reply_to_message?.from?.first_name as string) || user?.firstName || "N/A");
+    const ln = esc((m.reply_to_message?.from?.last_name as string) || user?.lastName || "");
+    const un = esc((m.reply_to_message?.from?.username as string) || user?.username || "N/A");
     const id = (m.reply_to_message?.from?.id as number) || targetUserId;
 
     let out = "👤 *User Info*\n\n";

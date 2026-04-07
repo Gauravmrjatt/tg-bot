@@ -119,7 +119,7 @@ bot.hears("👤 My Info", async (ctx) => {
     const user = await index_js_1.UserModel.findOne({ tgId: ctx.from.id });
     let out = "👤 *Your Info*\n\n";
     out += `*ID:* \`${ctx.from.id}\`\n`;
-    out += `*Name:* ${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}\n`;
+    out += `*Name:* ${(0, format_js_1.esc)(ctx.from.first_name)}${ctx.from.last_name ? " " + (0, format_js_1.esc)(ctx.from.last_name) : ""}\n`;
     if (user) {
         out += `\n*Joined:* ${user.joinedAt.toISOString().slice(0, 10)}\n`;
         const sec = Math.floor((Date.now() - user.lastActiveAt.getTime()) / 1000);

@@ -5,6 +5,7 @@ const telegraf_1 = require("telegraf");
 const index_js_1 = require("../models/index.js");
 const redis_js_1 = require("../utils/redis.js");
 const settings_js_1 = require("../utils/settings.js");
+const format_js_1 = require("../utils/format.js");
 function setupJoinRequest(bot, adminSet) {
     // Admin only — toggle global auto-approve (default OFF)
     bot.command("autoapprove", async (ctx) => {
@@ -37,7 +38,7 @@ function setupJoinRequest(bot, adminSet) {
                 lastActiveAt: new Date(),
             },
         }, { upsert: true });
-        const name = `${user.first_name}${user.last_name ? " " + user.last_name : ""}${user.username ? " (@" + user.username + ")" : ""}`;
+        const safeName = (0, format_js_1.esc)(`${user.first_name}${user.last_name ? " " + user.last_name : ""}${user.username ? " (@" + user.username + ")" : ""}`);
         if (globalAuto) {
             try {
                 await bot.telegram.approveChatJoinRequest(joinReq.chat.id, user.id);
@@ -54,7 +55,7 @@ function setupJoinRequest(bot, adminSet) {
                 });
                 for (const adminId of adminSet) {
                     try {
-                        await bot.telegram.sendMessage(adminId, `✅ *Auto-approved* join request from _${name}_`, { parse_mode: "Markdown" });
+                        await bot.telegram.sendMessage(adminId, `✅ *Auto-approved* join request from _${safeName}_`, { parse_mode: "Markdown" });
                     }
                     catch {
                         /* ignore */
@@ -79,7 +80,8 @@ function setupJoinRequest(bot, adminSet) {
             ]);
             for (const adminId of adminSet) {
                 try {
-                    const msg = await bot.telegram.sendMessage(adminId, `📨 *Join Request*\n\n*Name:* _${name}_\n*Chat ID:* \`${joinReq.chat.id}\``, {
+                    const msg = await bot.telegram.sendMessage(adminId, `📨 *Join Request*\n\n*Name:* _${safeName}_\n*Chat ID:* \`${joinReq.chat.id}\``, {
+                        parse_mode: "Markdown",
                         reply_markup: kb.reply_markup,
                     });
                     await index_js_1.JoinRequestModel.create({

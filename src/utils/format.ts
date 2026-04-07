@@ -2,6 +2,11 @@ import { Markup } from "telegraf";
 
 const KB = "Markdown" as const;
 
+// Escape special characters for Telegram MarkdownV2/Markdown
+export function esc(s: string): string {
+  return s.replace(/([_*`\[\]()~>#+\-=|{}.!\\])/g, "\\$1");
+}
+
 // User main keyboard — reply buttons at bottom
 export function userMainKeyboard() {
   return Markup.keyboard([

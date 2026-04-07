@@ -47,8 +47,7 @@ function setupAdminRelay(bot, adminSet) {
         if (m2.text && m2.text.startsWith("/"))
             return next();
         const userId = ctx.from.id;
-        const esc = (s) => s.replace(/([_*`\[\]()~>#+\-=|{}.!\\])/g, "\\$1");
-        const safeName = esc(`${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}${ctx.from.username ? " (@" + ctx.from.username + ")" : ""}`);
+        const safeName = (0, format_js_1.esc)(`${ctx.from.first_name}${ctx.from.last_name ? " " + ctx.from.last_name : ""}${ctx.from.username ? " (@" + ctx.from.username + ")" : ""}`);
         const adminIdsArray = Array.from(adminSet);
         if (adminIdsArray.length === 0) {
             await ctx.reply("⚠️ _No admins are configured. Contact the bot owner._", { parse_mode: PM });
@@ -95,9 +94,9 @@ function setupAdminRelay(bot, adminSet) {
         if (!targetUserId)
             return;
         const user = await index_js_1.UserModel.findOne({ tgId: targetUserId });
-        const fn = m.reply_to_message?.from?.first_name || user?.firstName || "N/A";
-        const ln = m.reply_to_message?.from?.last_name || user?.lastName || "";
-        const un = m.reply_to_message?.from?.username || user?.username || "N/A";
+        const fn = (0, format_js_1.esc)(m.reply_to_message?.from?.first_name || user?.firstName || "N/A");
+        const ln = (0, format_js_1.esc)(m.reply_to_message?.from?.last_name || user?.lastName || "");
+        const un = (0, format_js_1.esc)(m.reply_to_message?.from?.username || user?.username || "N/A");
         const id = m.reply_to_message?.from?.id || targetUserId;
         let out = "👤 *User Info*\n\n";
         out += `*Name:* ${fn}${ln ? " " + ln : ""}\n`;
