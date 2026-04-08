@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { GlobalSettingsModel } from "../models/index.js";
 
 export let redis: Redis;
 
@@ -17,10 +18,19 @@ const AUTO_APPROVE_TTL = 3600; // 1h — cache TTL for auto_approve flag
 export async function getAutoApprove(): Promise<boolean> {
   const cached = await redis.get("setting:auto_approve");
   if (cached !== null) return cached === "1";
-  return false;
+
+  const dbSetting = await GlobalSettingsModel.findOne({ key: "autoApprove" });
+  const value = dbSetting?.value === true;
+  await redis.set("setting:auto_approve", value ? "1" : "0", "EX", AUTO_APPROVE_TTL);
+  return value;
 }
 
 export async function setAutoApprove(value: boolean): Promise<void> {
+  await GlobalSettingsModel.findOneAndUpdate(
+    { key: "autoApprove" },
+    { key: "autoApprove", value },
+    { upsert: true },
+  );
   await redis.set("setting:auto_approve", value ? "1" : "0", "EX", AUTO_APPROVE_TTL);
 }
 

@@ -25,6 +25,7 @@ exports.banUser = banUser;
 exports.unbanUser = unbanUser;
 exports.getBannedUserIds = getBannedUserIds;
 const ioredis_1 = __importDefault(require("ioredis"));
+const index_js_1 = require("../models/index.js");
 async function connectRedis(url) {
     exports.redis = new ioredis_1.default(url, { retryStrategy: (times) => Math.min(times * 50, 2000) });
     exports.redis.on("error", (err) => console.error("Redis error:", err.message));
@@ -39,9 +40,13 @@ async function getAutoApprove() {
     const cached = await exports.redis.get("setting:auto_approve");
     if (cached !== null)
         return cached === "1";
-    return false;
+    const dbSetting = await index_js_1.GlobalSettingsModel.findOne({ key: "autoApprove" });
+    const value = dbSetting?.value === true;
+    await exports.redis.set("setting:auto_approve", value ? "1" : "0", "EX", AUTO_APPROVE_TTL);
+    return value;
 }
 async function setAutoApprove(value) {
+    await index_js_1.GlobalSettingsModel.findOneAndUpdate({ key: "autoApprove" }, { key: "autoApprove", value }, { upsert: true });
     await exports.redis.set("setting:auto_approve", value ? "1" : "0", "EX", AUTO_APPROVE_TTL);
 }
 async function cachePendingRequest(userId, data) {
