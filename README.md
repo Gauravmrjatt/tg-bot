@@ -6,6 +6,7 @@ A Telegram bot written in TypeScript (Telegraf + Express) with webhook support, 
 
 - **Join Request Approval** — User requests to join a private channel, admins get Approve/Decline inline buttons. Redis-backed for instant response.
 - **Auto-Approve Mode** — Global toggle. When ON, join requests are approved automatically (still logged for audit).
+- **Force Join System** — Require users to join specific channels before using the bot. Continuous membership verification on every message. Inline keyboard buttons for required channels with "Verify ✅" callback.
 - **Reply Keyboards** — Persistent buttons at the bottom, no commands needed. User buttons (Help, Rejoin, My Info, Message Admin). Admin buttons (Stats, Broadcast, Auto Approve, Admin Management, Config, Channel Settings).
 - **Admin Panel with Inline Keyboards** — Advanced admin interface using inline keyboards for navigation, user management, banning/unbanning, and configuration options.
 - **AI-Generated Welcome Messages** — Personalized welcome messages generated using AI for new users, making interactions more engaging.
@@ -120,6 +121,26 @@ npm run dev
 | 🔘 **📍 Set Channel** | Prompts for channel chat ID |
 | 🔘 **🔗 Set Link** | Prompts for invite link URL |
 
+### Admin Panel (Inline Keyboard)
+
+Access via `/admin` command:
+
+| Button | Flow |
+|--------|------|
+| 📋 **Set Channels** | Add required channels for force join (username or ID) |
+| 💬 **Set Welcome** | Set the welcome message displayed after verification |
+| 👁️ **Preview Welcome** | View the current welcome message |
+| ⬅️ **Back to Menu** | Return to main admin keyboard |
+
+### Force Join System
+
+| Action | Description |
+|--------|-------------|
+| `/start` | Checks channel membership → shows join buttons if not joined |
+| **Verify ✅** | Re-checks membership after joining channels |
+| Welcome message | Sent after all required channels joined (no buttons) |
+| Continuous check | Access blocked if user leaves any required channel |
+
 ### Admin Actions
 
 - **Join requests**: Approve/Decline inline buttons sent to admins when someone requests to join
@@ -153,11 +174,16 @@ src/
     joinRequest.ts    - Join request approval flow (with Redis caching)
     broadcast.ts      - Broadcast with rate limiting, retry_after, batched pagination
     adminRelay.ts     - User-to-admin message relay + /info reply handler
+    adminPanel.ts     - Admin panel with inline keyboard navigation
+    forceJoin.ts     - Force join system with channel membership verification
     stats.ts          - Stats dashboard (aggregation-optimized)
     menu.ts           - Inline keyboard handlers (user + admin menus)
   utils/
     db.ts             - MongoDB connection (with connection pooling)
     redis.ts          - Redis connection + atomic set ops (SADD/SREM/SMEMBERS), caching helpers
+    redis.js          - Storage utilities for Redis operations
     settings.ts       - getTargetChatId, setTargetChatId, get/set channel link
+    settings.js       - Settings helpers for Redis
     format.ts         - Reply keyboard builders + Markdown escape utility (esc)
+    membership.ts     - Channel membership verification utilities
 ```
