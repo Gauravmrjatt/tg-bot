@@ -7,6 +7,7 @@ import { connectRedis, getSetting, getAdminIds } from "./utils/redis.js";
 import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
+import { setupForceJoin } from "./handlers/forceJoin.js";
 import { getTargetChatId } from "./utils/settings.js";
 import { adminMainKeyboard, userMainKeyboard, cancelKeyboard, KB } from "./utils/format.js";
 
@@ -374,6 +375,8 @@ bot.command("unban", async (ctx) => {
 function setup(bot: any, AdminSet: Set<number>) {
   setupJoinRequest(bot, AdminSet);
   setupAdminRelay(bot, AdminSet);
+  setupForceJoin(bot);
+  // setupAdminPanelCallbacks(bot); // Handled in adminRelay.ts now
 }
 
 // --- Express server ---

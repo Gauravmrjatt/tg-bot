@@ -7,10 +7,13 @@ A Telegram bot written in TypeScript (Telegraf + Express) with webhook support, 
 - **Join Request Approval** — User requests to join a private channel, admins get Approve/Decline inline buttons. Redis-backed for instant response.
 - **Auto-Approve Mode** — Global toggle. When ON, join requests are approved automatically (still logged for audit).
 - **Reply Keyboards** — Persistent buttons at the bottom, no commands needed. User buttons (Help, Rejoin, My Info, Message Admin). Admin buttons (Stats, Broadcast, Auto Approve, Admin Management, Config, Channel Settings).
+- **Admin Panel with Inline Keyboards** — Advanced admin interface using inline keyboards for navigation, user management, banning/unbanning, and configuration options.
+- **AI-Generated Welcome Messages** — Personalized welcome messages generated using AI for new users, making interactions more engaging.
 - **Conversational Flows** — Click a button → bot prompts for input → done. Every step has a Cancel button to return to main menu.
 - **Broadcast with Delivery Tracking** — Rate-limited batch sending with `retry_after` handling. Delivered/failed/blocked counters.
 - **Admin Relay** — Users DM the bot, ALL message types (text, photos, docs, video, audio, stickers, polls) are forwarded to admins. Admins reply to the forwarded message — reply resolves correctly per admin via Redis mapping. Reply with `/info` on any forwarded message to see user details.
 - **Admin Management** — Add/remove admins at runtime via interactive flow with Cancel support.
+- **User Banning/Unbanning** — Ban or unban users with inline keyboard confirmations and pagination for banned users list.
 - **User Info** — `/info` shows name, username, ID, join date, last active, admin status.
 - **Stats Dashboard** — User count, join request history, broadcast delivery rates.
 - **User Tracking** — Every interacting user persists in MongoDB automatically.
@@ -46,6 +49,7 @@ BOT_TOKEN=your-bot-token-from-botfather
 MONGO_URI=mongodb://localhost:27017/bot
 WEBHOOK_URL=https://your-domain.com
 ADMIN_IDS=123456,789012
+OPENAI_API_KEY=your-openai-api-key
 
 # Optional
 REDIS_URL=redis://localhost:6379
@@ -91,7 +95,7 @@ npm run dev
 
 | Action | Description |
 |--------|-------------|
-| `/start` | Shows welcome message with **reply keyboard** buttons |
+| `/start` | Shows AI-generated personalized welcome message with **reply keyboard** buttons |
 | 🔘 **📋 Help** | Shows available options |
 | 🔘 **🔗 Rejoin** | Get the channel invite link |
 | 🔘 **👤 My Info** | View your account details |
@@ -106,6 +110,9 @@ npm run dev
 | 🔘 **📢 Broadcast** | Prompts for message text → sends to all users with delivery tracking |
 | 🔘 **⚡ Auto Approve** | Toggles auto-approve for join requests (ON/OFF) |
 | 🔘 **🔍 Bcast Status** | Prompts for broadcast ID → shows delivery status |
+| 🔘 **🚫 Ban User** | Prompts for user ID → bans user with confirmation |
+| 🔘 **✅ Unban User** | Prompts for user ID → unbans user with confirmation |
+| 🔘 **📋 List Banned** | Shows paginated list of banned users with inline keyboard navigation |
 | 🔘 **➕ Add Admin** | Prompts for user ID → adds as admin |
 | 🔘 **➖ Remove Admin** | Prompts for user ID → removes from admins |
 | 🔘 **👥 List Admins** | Shows all current admin IDs |
@@ -116,6 +123,7 @@ npm run dev
 ### Admin Actions
 
 - **Join requests**: Approve/Decline inline buttons sent to admins when someone requests to join
+- **Admin Panel**: Access advanced features via inline keyboards for banning/unbanning users, viewing banned lists with pagination, and managing configurations.
 - **Reply to users**: Reply to any forwarded user message — response is delivered to them. Each admin's reply mapping is cached separately in Redis, no cross-admin conflicts.
 - **User info**: Reply to a forwarded message with `/info` to see that user's details (name, username, ID, join date, last active, admin status). Info is shown to the admin only — never forwarded to the user.
 - **Cancel anytime**: Every conversational flow shows a **❌ Cancel** button to return to the main menu

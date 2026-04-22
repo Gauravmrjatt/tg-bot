@@ -45,6 +45,7 @@ const redis_js_1 = require("./utils/redis.js");
 const index_js_1 = require("./models/index.js");
 const joinRequest_js_1 = require("./handlers/joinRequest.js");
 const adminRelay_js_1 = require("./handlers/adminRelay.js");
+const forceJoin_js_1 = require("./handlers/forceJoin.js");
 const settings_js_1 = require("./utils/settings.js");
 const format_js_1 = require("./utils/format.js");
 dotenv_1.default.config();
@@ -396,6 +397,8 @@ bot.command("unban", async (ctx) => {
 function setup(bot, AdminSet) {
     (0, joinRequest_js_1.setupJoinRequest)(bot, AdminSet);
     (0, adminRelay_js_1.setupAdminRelay)(bot, AdminSet);
+    (0, forceJoin_js_1.setupForceJoin)(bot);
+    // setupAdminPanelCallbacks(bot); // Handled in adminRelay.ts now
 }
 // --- Express server ---
 async function main() {

@@ -1,12 +1,21 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.setupAdminRelay = setupAdminRelay;
+const telegraf_1 = require("telegraf");
 const redis_js_1 = require("../utils/redis.js");
 const index_js_1 = require("../models/index.js");
 const settings_js_1 = require("../utils/settings.js");
 const broadcast_js_1 = require("./broadcast.js");
 const format_js_1 = require("../utils/format.js");
 const PM = "Markdown";
+function adminPanelKeyboard() {
+    return telegraf_1.Markup.inlineKeyboard([
+        [telegraf_1.Markup.button.callback("📋 Set Channels", "admin_set_channels")],
+        [telegraf_1.Markup.button.callback("💬 Set Welcome", "admin_set_welcome")],
+        [telegraf_1.Markup.button.callback("👁️ Preview Welcome", "admin_preview")],
+        [telegraf_1.Markup.button.callback("⬅️ Back to Menu", "admin_back")],
+    ]);
+}
 async function showUserInfo(ctx, targetUserId) {
     const user = await index_js_1.UserModel.findOne({ tgId: targetUserId });
     if (!user) {
@@ -34,20 +43,143 @@ async function showUserInfo(ctx, targetUserId) {
     return ctx.reply(out, { parse_mode: PM });
 }
 function setupAdminRelay(bot, adminSet) {
-    // --- User message forwarding to admins ---
+    bot.command("admin", async (ctx) => {
+        if (!ctx.from || !adminSet.has(ctx.from.id))
+            return;
+        await ctx.reply("🛠️ *Admin Panel*", {
+            parse_mode: PM,
+            reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup
+        });
+    });
+    bot.action("admin_set_channels", async (ctx) => {
+        const userId = ctx.callbackQuery.from.id;
+        await ctx.answerCbQuery("Send channel username or ID");
+        await (0, redis_js_1.setAdminState)(userId, { action: "add_required_channel" });
+        await ctx.editMessageText("📝 *Send the channel username (e.g., @channelname) or numeric ID (e.g., -1001234567890)*", {
+            parse_mode: PM,
+            reply_markup: telegraf_1.Markup.inlineKeyboard([
+                [telegraf_1.Markup.button.callback("❌ Cancel", "admin_cancel")]
+            ]).reply_markup
+        });
+    });
+    bot.action("admin_set_welcome", async (ctx) => {
+        const userId = ctx.callbackQuery.from.id;
+        await ctx.answerCbQuery("Send welcome message text");
+        await (0, redis_js_1.setAdminState)(userId, { action: "set_welcome_message" });
+        await ctx.editMessageText("📝 *Send the welcome message text you want to use*", {
+            parse_mode: PM,
+            reply_markup: telegraf_1.Markup.inlineKeyboard([
+                [telegraf_1.Markup.button.callback("❌ Cancel", "admin_cancel")]
+            ]).reply_markup
+        });
+    });
+    bot.action("admin_preview", async (ctx) => {
+        await ctx.answerCbQuery();
+        const welcomeMsg = await (0, redis_js_1.getSetting)("welcome_message") || "Welcome! Thanks for joining our channels.";
+        await ctx.editMessageText(`👁️ *Current Welcome Message:*\n\n${welcomeMsg}`, {
+            parse_mode: PM,
+            reply_markup: telegraf_1.Markup.inlineKeyboard([
+                [telegraf_1.Markup.button.callback("⬅️ Back", "admin_back")]
+            ]).reply_markup
+        });
+    });
+    bot.action("admin_back", async (ctx) => {
+        await ctx.answerCbQuery();
+        await ctx.editMessageText("🛠️ *Admin Panel*", {
+            parse_mode: PM,
+            reply_markup: adminPanelKeyboard().reply_markup
+        });
+    });
+    bot.action("admin_cancel", async (ctx) => {
+        const userId = ctx.callbackQuery.from.id;
+        await ctx.answerCbQuery("Cancelled");
+        await (0, redis_js_1.clearAdminState)(userId);
+        await ctx.editMessageText("🛠️ *Admin Panel*", {
+            parse_mode: PM,
+            reply_markup: adminPanelKeyboard().reply_markup
+        });
+    });
+    bot.on("message", async (ctx, next) => {
+        const userId = ctx.from?.id;
+        if (!userId)
+            return next();
+        const adminState = await (0, redis_js_1.getAdminState)(userId);
+        if (!adminState)
+            return next();
+        const text = ctx.message.text;
+        if (!text)
+            return next();
+        await (0, redis_js_1.clearAdminState)(userId);
+        switch (adminState.action) {
+            case "add_required_channel": {
+                const channelInput = text.trim();
+                if (!channelInput) {
+                    return ctx.reply("❌ Please provide a valid channel username or ID");
+                }
+                try {
+                    const channelsData = await (0, redis_js_1.getSetting)("required_channels");
+                    let channels = [];
+                    if (channelsData) {
+                        try {
+                            channels = JSON.parse(channelsData);
+                        }
+                        catch {
+                            channels = [];
+                        }
+                    }
+                    const exists = channels.some(c => c.chatId === channelInput);
+                    if (exists) {
+                        return ctx.reply(`⚠️ Channel ${channelInput} is already in the list`);
+                    }
+                    let title;
+                    try {
+                        const chat = await ctx.telegram.getChat(channelInput);
+                        title = chat.title;
+                    }
+                    catch (err) {
+                        console.warn(`Could not fetch info for ${channelInput}:`, err.message);
+                    }
+                    channels.push({ chatId: channelInput, title });
+                    await (0, redis_js_1.setSetting)("required_channels", JSON.stringify(channels));
+                    return ctx.reply(`✅ *Channel added!*\n\n${channelInput}${title ? ` (${title})` : ""}`, {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup
+                    });
+                }
+                catch (err) {
+                    return ctx.reply(`❌ Failed to add channel: ${err.message}`, { parse_mode: "Markdown" });
+                }
+            }
+            case "set_welcome_message": {
+                const welcomeText = text.trim();
+                if (!welcomeText) {
+                    return ctx.reply("❌ Welcome message cannot be empty");
+                }
+                await (0, redis_js_1.setSetting)("welcome_message", welcomeText);
+                return ctx.reply("✅ *Welcome message updated!*", {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup
+                });
+            }
+            default:
+                return next();
+        }
+    });
     bot.on("message", async (ctx, next) => {
         if (!ctx.from)
             return next();
-        // Admin: check for reply to forwarded message OR interactive flow
         if (adminSet.has(ctx.from.id)) {
             const m = ctx.message;
             const replyTo = m.reply_to_message;
-            // First priority: admin replying to a forwarded message
             if (replyTo?.message_id) {
-                const userId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, replyTo.message_id);
+                let userId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, replyTo.message_id);
+                if (!userId) {
+                    const fwdFrom = replyTo.forward_from;
+                    if (fwdFrom?.id)
+                        userId = Number(fwdFrom.id);
+                }
                 if (userId) {
                     const replyText = m.text || m.caption || "";
-                    // Check for /info, /ban, /unban commands
                     if (replyText === "/info" || replyText.startsWith("/info ")) {
                         await showUserInfo(ctx, userId);
                         return;
@@ -82,23 +214,19 @@ function setupAdminRelay(bot, adminSet) {
                     return;
                 }
             }
-            // Second priority: interactive admin state flow
             const state = await (0, redis_js_1.getAdminState)(ctx.from.id);
             if (state) {
                 await handleAdminFlow(bot, ctx, state, adminSet);
                 return;
             }
-            // Admin sent a regular message with no state and no reply mapping — ignore
             return next();
         }
-        // Non-admin: forward DMs to admins
         if (ctx.chat.type !== "private")
             return next();
         const m2 = ctx.message;
         if (m2.text && m2.text.startsWith("/"))
             return next();
         const userId = ctx.from.id;
-        // Check if user is banned
         const banned = await (0, redis_js_1.isUserBanned)(userId);
         if (banned) {
             await ctx.reply("🚫 _You are banned by admin. Your messages will not be delivered._", { parse_mode: PM });
@@ -128,21 +256,23 @@ function setupAdminRelay(bot, adminSet) {
             await ctx.reply("❌ _Failed to reach any admin. Try again later._", { parse_mode: PM });
         }
     });
-    // --- /info command ---
     bot.command("info", async (ctx) => {
         if (!ctx.from || !adminSet.has(ctx.from.id))
             return;
         let targetUserId;
         const m = ctx.message;
-        // If replying to a forwarded message, resolve via Redis mapping
         if (m.reply_to_message?.message_id) {
             const fwdUserId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, m.reply_to_message.message_id);
             if (fwdUserId) {
                 await showUserInfo(ctx, fwdUserId);
                 return;
             }
+            const fwdFrom = m.reply_to_message.forward_from;
+            if (fwdFrom?.id) {
+                await showUserInfo(ctx, Number(fwdFrom.id));
+                return;
+            }
         }
-        // Fallback: use replied user ID or parse from command text
         if (m.reply_to_message?.from)
             targetUserId = m.reply_to_message.from.id;
         if (!targetUserId) {
@@ -159,7 +289,6 @@ function setupAdminRelay(bot, adminSet) {
             return;
         await showUserInfo(ctx, targetUserId);
     });
-    // --- /bcast command ---
     bot.command("bcast", async (ctx) => {
         if (!ctx.from || !adminSet.has(ctx.from.id))
             return;
@@ -175,249 +304,243 @@ function setupAdminRelay(bot, adminSet) {
         msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
         return ctx.reply(msg, { parse_mode: PM });
     });
-}
-async function handleAdminFlow(bot, ctx, state, adminSet) {
-    const text = ctx.message.text || "";
-    const cancel = text === "❌ Cancel";
-    if (cancel || text === "/cancel") {
-        await (0, redis_js_1.clearAdminState)(ctx.from.id);
-        return ctx.reply("🔙 _Operation cancelled._", {
-            parse_mode: PM,
-            reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-        });
-    }
-    const uid = ctx.from.id;
-    switch (state.action) {
-        case "add_admin": {
-            const userId = parseInt(text, 10);
-            if (isNaN(userId)) {
-                return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (adminSet.has(userId)) {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply(`⚠ _User_ \`${userId}\` _is already an admin._`, {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            adminSet.add(userId);
-            await (0, redis_js_1.addAdminId)(userId);
-            await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { tgId: userId, isAdmin: true } }, { upsert: true });
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`✅ _User_ \`${userId}\` _is now an admin._`, {
+    async function handleAdminFlow(bot, ctx, state, adminSet) {
+        const text = ctx.message.text || "";
+        const cancel = text === "❌ Cancel";
+        if (cancel || text === "/cancel") {
+            await (0, redis_js_1.clearAdminState)(ctx.from.id);
+            return ctx.reply("🔙 _Operation cancelled._", {
                 parse_mode: PM,
                 reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
             });
         }
-        case "remove_admin": {
-            const userId = parseInt(text, 10);
-            if (isNaN(userId) || userId === 0) {
-                return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (userId === uid) {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply("🚫 _Cannot remove yourself._", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            if (!adminSet.has(userId)) {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply(`⚠ _User_ \`${userId}\` _is not an admin._`, {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            adminSet.delete(userId);
-            await (0, redis_js_1.removeAdminId)(userId);
-            await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isAdmin: false } });
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`🔻 _User_ \`${userId}\` _is no longer an admin._`, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "set_channel": {
-            const chatId = parseInt(text, 10);
-            if (isNaN(chatId)) {
-                return ctx.reply("❌ Invalid chat ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            await (0, settings_js_1.setTargetChatId)(chatId);
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`✅ *Channel ID set to:* \`${chatId}\``, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "set_link": {
-            if (!text.startsWith("https://t.me") && !text.startsWith("https://telegram.me")) {
-                return ctx.reply("❌ Invalid Telegram link. Example: \`https://t.me/+xxxxx\`:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            await (0, settings_js_1.setChannelLink)(text);
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply("✅ *Channel invite link set.*", {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "broadcast": {
-            const m = ctx.message;
-            const data = state.data;
-            // Step 1: Receive message (text or photo)
-            if (!data?.text && !data?.photoFileId) {
-                const photo = m.photo?.[m.photo.length - 1];
-                const caption = m.caption || "";
-                if (photo) {
-                    // Photo broadcast
-                    await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: caption, photoFileId: photo.file_id } });
-                    return ctx.reply("📸 *Photo received.*\n\n_Send button text (or type *skip* to send without a button):_", {
+        const uid = ctx.from.id;
+        switch (state.action) {
+            case "add_admin": {
+                const userId = parseInt(text, 10);
+                if (isNaN(userId)) {
+                    return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
                         parse_mode: PM,
                         reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
                     });
                 }
-                if (!text.trim()) {
-                    return ctx.reply("❌ Send a photo with caption, or type text message:", {
-                        parse_mode: PM,
-                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                    });
-                }
-                // Text broadcast
-                await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: text } });
-                return ctx.reply("📝 *Text received.*\n\n_Send button text (or type *skip* to send without a button):_", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            // Step 2: Receive button text
-            if (data?.step === "ask_button_text") {
-                if (text.toLowerCase() === "skip") {
+                if (adminSet.has(userId)) {
                     await (0, redis_js_1.clearAdminState)(uid);
-                    await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId });
+                    return ctx.reply(`⚠ _User_ \`${userId}\` _is already an admin._`, {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                adminSet.add(userId);
+                await (0, redis_js_1.addAdminId)(userId);
+                await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { tgId: userId, isAdmin: true } }, { upsert: true });
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply(`✅ _User_ \`${userId}\` _is now an admin._`, {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "remove_admin": {
+                const userId = parseInt(text, 10);
+                if (isNaN(userId) || userId === 0) {
+                    return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (userId === uid) {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    return ctx.reply("🚫 _Cannot remove yourself._", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                if (!adminSet.has(userId)) {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    return ctx.reply(`⚠ _User_ \`${userId}\` _is not an admin._`, {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                adminSet.delete(userId);
+                await (0, redis_js_1.removeAdminId)(userId);
+                await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isAdmin: false } });
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply(`���� _User_ \`${userId}\` _is no longer an admin._`, {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "set_channel": {
+                const chatId = parseInt(text, 10);
+                if (isNaN(chatId)) {
+                    return ctx.reply("❌ Invalid chat ID. Send a numeric ID:", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                await (0, settings_js_1.setTargetChatId)(chatId);
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply(`✅ *Channel ID set to:* \`${chatId}\``, {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "set_link": {
+                if (!text.startsWith("https://t.me") && !text.startsWith("https://telegram.me")) {
+                    return ctx.reply("❌ Invalid Telegram link. Example: \`https://t.me/+xxxxx\`:", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                await (0, settings_js_1.setChannelLink)(text);
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply("✅ *Channel invite link set.*", {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "broadcast": {
+                const m = ctx.message;
+                const data = state.data;
+                if (!data?.text && !data?.photoFileId) {
+                    const photo = m.photo?.[m.photo.length - 1];
+                    const caption = m.caption || "";
+                    if (photo) {
+                        await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: caption, photoFileId: photo.file_id } });
+                        return ctx.reply("📸 *Photo received.*\n\n_Send button text (or type *skip* to send without a button):_", {
+                            parse_mode: PM,
+                            reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                        });
+                    }
+                    if (!caption.trim()) {
+                        return ctx.reply("❌ Send a photo with caption, or type text message:", {
+                            parse_mode: PM,
+                            reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                        });
+                    }
+                    await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: caption } });
+                    return ctx.reply("📝 *Text received.*\n\n_Send button text (or type *skip* to send without a button):_", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (data?.step === "ask_button_text") {
+                    if (text.toLowerCase() === "skip") {
+                        await (0, redis_js_1.clearAdminState)(uid);
+                        await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId });
+                        return;
+                    }
+                    await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { ...data, step: "ask_button_url", buttonText: text } });
+                    return ctx.reply("🔗 _Now send the button URL:_", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (data?.step === "ask_button_url") {
+                    if (text.toLowerCase() === "skip") {
+                        await (0, redis_js_1.clearAdminState)(uid);
+                        await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId, buttonText: data.buttonText });
+                        return;
+                    }
+                    if (!text.startsWith("http://") && !text.startsWith("https://")) {
+                        return ctx.reply("❌ Invalid URL. Must start with http:// or https://:", {
+                            parse_mode: PM,
+                            reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                        });
+                    }
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId, buttonText: data.buttonText, buttonUrl: text });
                     return;
                 }
-                await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { ...data, step: "ask_button_url", buttonText: text } });
-                return ctx.reply("🔗 _Now send the button URL:_", {
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply("⚠ _Broadcast session expired. Please try again._", {
                     parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
                 });
             }
-            // Step 3: Receive button URL
-            if (data?.step === "ask_button_url") {
-                if (text.toLowerCase() === "skip") {
-                    await (0, redis_js_1.clearAdminState)(uid);
-                    await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId, buttonText: data.buttonText });
-                    return;
+            case "bcast_status": {
+                const bid = text.trim();
+                await (0, redis_js_1.clearAdminState)(uid);
+                if (!bid) {
+                    return ctx.reply("❌ Invalid broadcast ID.", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
                 }
-                if (!text.startsWith("http://") && !text.startsWith("https://")) {
-                    return ctx.reply("❌ Invalid URL. Must start with http:// or https://:", {
+                const bc = await index_js_1.BroadcastModel.findOne({ messageId: bid }).lean();
+                if (!bc) {
+                    return ctx.reply("Broadcast not found.", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                let msg = `📢 *Broadcast* \`${bc.messageId}\`\n`;
+                msg += `*Status:* _${bc.status}_\n`;
+                msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
+                msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
+                return ctx.reply(msg, {
+                    parse_mode: PM,
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "ban_user": {
+                const userId = parseInt(text, 10);
+                if (isNaN(userId)) {
+                    return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
                         parse_mode: PM,
                         reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
                     });
                 }
+                if (adminSet.has(userId)) {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    return ctx.reply("🚫 _Cannot ban an admin._", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                const alreadyBanned = await (0, redis_js_1.isUserBanned)(userId);
+                if (alreadyBanned) {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    return ctx.reply(`⚠ _User_ \`${userId}\` _is already banned._`, {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                await (0, redis_js_1.banUser)(userId);
+                await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isBanned: true } }, { upsert: true });
                 await (0, redis_js_1.clearAdminState)(uid);
-                await (0, broadcast_js_1.runBroadcast)(bot, ctx, { text: data.text || "", photoFileId: data.photoFileId, buttonText: data.buttonText, buttonUrl: text });
-                return;
-            }
-            // Fallback
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply("⚠ _Broadcast session expired. Please try again._", {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "bcast_status": {
-            const bid = text.trim();
-            await (0, redis_js_1.clearAdminState)(uid);
-            if (!bid) {
-                return ctx.reply("❌ Invalid broadcast ID.", {
+                return ctx.reply(`🚫 _User_ \`${userId}\` _has been banned._`, {
                     parse_mode: PM,
                     reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
                 });
             }
-            const bc = await index_js_1.BroadcastModel.findOne({ messageId: bid }).lean();
-            if (!bc) {
-                return ctx.reply("Broadcast not found.", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            let msg = `📢 *Broadcast* \`${bc.messageId}\`\n`;
-            msg += `*Status:* _${bc.status}_\n`;
-            msg += `*Sent:* ${bc.sentAt.toISOString().slice(0, 19).replace("T", " ")}\n\n`;
-            msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
-            return ctx.reply(msg, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "ban_user": {
-            const userId = parseInt(text, 10);
-            if (isNaN(userId)) {
-                return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (adminSet.has(userId)) {
+            case "unban_user": {
+                const userId = parseInt(text, 10);
+                if (isNaN(userId)) {
+                    return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                const banned = await (0, redis_js_1.isUserBanned)(userId);
+                if (!banned) {
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    return ctx.reply(`⚠ _User_ \`${userId}\` _is not banned._`, {
+                        parse_mode: PM,
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                await (0, redis_js_1.unbanUser)(userId);
+                await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isBanned: false } });
                 await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply("🚫 _Cannot ban an admin._", {
+                return ctx.reply(`✅ _User_ \`${userId}\` _has been unbanned._`, {
                     parse_mode: PM,
                     reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
                 });
             }
-            const alreadyBanned = await (0, redis_js_1.isUserBanned)(userId);
-            if (alreadyBanned) {
+            default:
                 await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply(`⚠ _User_ \`${userId}\` _is already banned._`, {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            await (0, redis_js_1.banUser)(userId);
-            await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isBanned: true } }, { upsert: true });
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`🚫 _User_ \`${userId}\` _has been banned._`, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
         }
-        case "unban_user": {
-            const userId = parseInt(text, 10);
-            if (isNaN(userId)) {
-                return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            const banned = await (0, redis_js_1.isUserBanned)(userId);
-            if (!banned) {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply(`⚠ _User_ \`${userId}\` _is not banned._`, {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            await (0, redis_js_1.unbanUser)(userId);
-            await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isBanned: false } });
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`✅ _User_ \`${userId}\` _has been unbanned._`, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        default:
-            await (0, redis_js_1.clearAdminState)(uid);
     }
 }
