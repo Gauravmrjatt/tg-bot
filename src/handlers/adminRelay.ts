@@ -5,6 +5,7 @@ import {
   addAdminId, removeAdminId,
   banUser, unbanUser, isUserBanned,
   getRequiredChannels, addRequiredChannel,
+  getUserVerifiedChannels,
   getSetting, setSetting,
 } from "../utils/redis.js";
 import { UserModel, BroadcastModel } from "../models/index.js";
@@ -239,6 +240,22 @@ const state = await getAdminState(ctx.from.id);
     if (m2.text && m2.text.startsWith("/")) return next();
 
     const userId = ctx.from.id;
+
+    const requiredChannels = await getRequiredChannels();
+    if (requiredChannels.length > 0) {
+      const verifiedChatIds = await getUserVerifiedChannels(userId);
+      const verifiedSet = new Set(verifiedChatIds);
+      const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+      if (!allJoined) {
+        let msg = "Join all channels first:\n\n";
+        for (const ch of requiredChannels) {
+          msg += "- " + ch.name + "\n";
+        }
+        msg += "\nThen click /verify";
+        await ctx.reply(msg);
+        return;
+      }
+    }
 
     const banned = await isUserBanned(userId);
     if (banned) {

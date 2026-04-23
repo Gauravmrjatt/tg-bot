@@ -191,6 +191,21 @@ function setupAdminRelay(bot, adminSet) {
         if (m2.text && m2.text.startsWith("/"))
             return next();
         const userId = ctx.from.id;
+        const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+        if (requiredChannels.length > 0) {
+            const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
+            const verifiedSet = new Set(verifiedChatIds);
+            const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+            if (!allJoined) {
+                let msg = "Join all channels first:\n\n";
+                for (const ch of requiredChannels) {
+                    msg += "- " + ch.name + "\n";
+                }
+                msg += "\nThen click /verify";
+                await ctx.reply(msg);
+                return;
+            }
+        }
         const banned = await (0, redis_js_1.isUserBanned)(userId);
         if (banned) {
             await ctx.reply("🚫 _You are banned by admin. Your messages will not be delivered._", { parse_mode: PM });
