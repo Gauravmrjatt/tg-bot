@@ -314,186 +314,12 @@ function setupAdminRelay(bot, adminSet) {
                 reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
             });
         }
-<<<<<<< HEAD
         const uid = ctx.from.id;
         switch (state.action) {
             case "add_admin": {
                 const userId = parseInt(text, 10);
                 if (isNaN(userId)) {
                     return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
-=======
-        case "remove_admin": {
-            const userId = parseInt(text, 10);
-            if (isNaN(userId) || userId === 0) {
-                return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (userId === uid) {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply("🚫 _Cannot remove yourself._", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            if (!adminSet.has(userId)) {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply(`⚠ _User_ \`${userId}\` _is not an admin._`, {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            adminSet.delete(userId);
-            await (0, redis_js_1.removeAdminId)(userId);
-            await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { isAdmin: false } });
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`🔻 _User_ \`${userId}\` _is no longer an admin._`, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "set_channel": {
-            const chatId = parseInt(text, 10);
-            if (isNaN(chatId)) {
-                return ctx.reply("❌ Invalid chat ID. Send a numeric ID:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            await (0, settings_js_1.setTargetChatId)(chatId);
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply(`✅ *Channel ID set to:* \`${chatId}\``, {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "set_link": {
-            if (!text.startsWith("https://t.me") && !text.startsWith("https://telegram.me")) {
-                return ctx.reply("❌ Invalid Telegram link. Example: `https://t.me/+xxxxx`:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            await (0, settings_js_1.setChannelLink)(text);
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply("✅ *Channel invite link set.*", {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "set_welcome_msg": {
-            if (text === "❌ Cancel" || text === "/cancel") {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply("🔙 Welcome message unchanged.", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            await (0, settings_js_1.setWelcomeMessage)(text);
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply("✅ *Welcome message set.*", {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "set_folder_link": {
-            if (text === "❌ Cancel" || text === "/cancel") {
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply("🔙 Folder link unchanged.", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            if (!text.includes("t.me") && !text.includes("telegram.me")) {
-                return ctx.reply("❌ Invalid link. Use format: https://t.me/...", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            await (0, settings_js_1.setFolderLink)(text);
-            await (0, redis_js_1.clearAdminState)(uid);
-            return ctx.reply("✅ *Folder link set.*", {
-                parse_mode: PM,
-                reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-            });
-        }
-        case "add_channel": {
-            const data = state.data;
-            const step = data?.step;
-            if (!step) {
-                await (0, redis_js_1.setAdminState)(uid, { action: "add_channel", data: { step: "name" } });
-                return ctx.reply("📋 *Add Required Channel*\n\n_Step 1/3: Send the channel name_:", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (step === "name") {
-                const name = text.trim();
-                if (!name) {
-                    return ctx.reply("❌ Please send a valid name:", {
-                        parse_mode: PM,
-                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                    });
-                }
-                await (0, redis_js_1.setAdminState)(uid, { action: "add_channel", data: { step: "chatId", name } });
-                return ctx.reply("📋 *Add Required Channel*\n\n_Step 2/3: Send the channel chat ID (numeric):_", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (step === "chatId") {
-                const chatId = parseInt(text, 10);
-                if (isNaN(chatId)) {
-                    return ctx.reply("❌ Invalid chat ID. Send a numeric ID:", {
-                        parse_mode: PM,
-                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                    });
-                }
-                const currentChannels = await (0, redis_js_1.getRequiredChannels)();
-                if (currentChannels.some(c => c.chatId === chatId)) {
-                    await (0, redis_js_1.clearAdminState)(uid);
-                    return ctx.reply("⚠️ This channel is already configured.", {
-                        parse_mode: PM,
-                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                    });
-                }
-                await (0, redis_js_1.setAdminState)(uid, { action: "add_channel", data: { step: "inviteLink", name: data?.name, chatId } });
-                return ctx.reply("📋 *Add Required Channel*\n\n_Step 3/3: Send the invite link (https://t.me/...):_", {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                });
-            }
-            if (step === "inviteLink") {
-                const inviteLink = text.trim();
-                if (!inviteLink.startsWith("https://t.me") && !inviteLink.startsWith("https://telegram.me") && !inviteLink.startsWith("t.me")) {
-                    return ctx.reply("❌ Invalid link. Send format: `https://t.me/...`:", {
-                        parse_mode: PM,
-                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-                    });
-                }
-                const finalLink = inviteLink.startsWith("http") ? inviteLink : `https://${inviteLink}`;
-                await (0, redis_js_1.addRequiredChannel)(data.name, data.chatId, finalLink);
-                await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply(`✅ *Channel added:*\n\n*Name:* ${data.name}\n*ID:* \`${data.chatId}\`\n*Link:* ${finalLink}`, {
-                    parse_mode: PM,
-                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
-                });
-            }
-            break;
-        }
-        case "broadcast": {
-            const m = ctx.message;
-            const data = state.data;
-            // Step 1: Receive message (text or photo)
-            if (!data?.text && !data?.photoFileId) {
-                const photo = m.photo?.[m.photo.length - 1];
-                const caption = m.caption || "";
-                if (photo) {
-                    // Photo broadcast
-                    await (0, redis_js_1.setAdminState)(uid, { action: "broadcast", data: { step: "ask_button_text", text: caption, photoFileId: photo.file_id } });
-                    return ctx.reply("📸 *Photo received.*\n\n_Send button text (or type *skip* to send without a button):_", {
->>>>>>> ce00aa0 (/ban fixed and custme msg)
                         parse_mode: PM,
                         reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
                     });
@@ -562,15 +388,32 @@ function setupAdminRelay(bot, adminSet) {
             }
             case "set_link": {
                 if (!text.startsWith("https://t.me") && !text.startsWith("https://telegram.me")) {
-                    return ctx.reply("❌ Invalid Telegram link. Example: \`https://t.me/+xxxxx\`:", {
-                        parse_mode: PM,
+                    return ctx.reply("Invalid Telegram link.", {
                         reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
                     });
                 }
                 await (0, settings_js_1.setChannelLink)(text);
                 await (0, redis_js_1.clearAdminState)(uid);
-                return ctx.reply("✅ *Channel invite link set.*", {
-                    parse_mode: PM,
+                return ctx.reply("Channel invite link set.", {
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "set_welcome_msg": {
+                await (0, settings_js_1.setWelcomeMessage)(text);
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply("Welcome message set.", {
+                    reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                });
+            }
+            case "set_folder_link": {
+                if (!text.includes("t.me") && !text.includes("telegram.me")) {
+                    return ctx.reply("Invalid link.", {
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                await (0, settings_js_1.setFolderLink)(text);
+                await (0, redis_js_1.clearAdminState)(uid);
+                return ctx.reply("Folder link set.", {
                     reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
                 });
             }
