@@ -24,6 +24,11 @@ exports.isUserBanned = isUserBanned;
 exports.banUser = banUser;
 exports.unbanUser = unbanUser;
 exports.getBannedUserIds = getBannedUserIds;
+exports.getRequiredChannels = getRequiredChannels;
+exports.addRequiredChannel = addRequiredChannel;
+exports.removeRequiredChannel = removeRequiredChannel;
+exports.getUserVerifiedChannels = getUserVerifiedChannels;
+exports.setUserVerifiedChannels = setUserVerifiedChannels;
 const ioredis_1 = __importDefault(require("ioredis"));
 const index_js_1 = require("../models/index.js");
 async function connectRedis(url) {
@@ -122,4 +127,31 @@ async function unbanUser(userId) {
 async function getBannedUserIds() {
     const raw = await exports.redis.smembers("banned:users");
     return raw.map(Number);
+}
+async function getRequiredChannels() {
+    const data = await exports.redis.get("required_channels");
+    return data ? JSON.parse(data) : [];
+}
+async function addRequiredChannel(name, chatId, inviteLink) {
+    const channels = await getRequiredChannels();
+    if (channels.some(c => c.chatId === chatId))
+        return;
+    channels.push({ name, chatId, inviteLink });
+    await exports.redis.set("required_channels", JSON.stringify(channels));
+}
+async function removeRequiredChannel(chatId) {
+    const channels = await getRequiredChannels();
+    const filtered = channels.filter(c => c.chatId !== chatId);
+    await exports.redis.set("required_channels", JSON.stringify(filtered));
+}
+async function getUserVerifiedChannels(userId) {
+    const data = await exports.redis.get(`verified_channels:${userId}`);
+    if (data)
+        return JSON.parse(data);
+    const user = await index_js_1.UserModel.findOne({ tgId: userId });
+    return user?.verifiedChannels || [];
+}
+async function setUserVerifiedChannels(userId, chatIds) {
+    await exports.redis.set(`verified_channels:${userId}`, JSON.stringify(chatIds));
+    await index_js_1.UserModel.updateOne({ tgId: userId }, { $set: { verifiedChannels: chatIds } }, { upsert: true });
 }

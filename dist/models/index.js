@@ -13,6 +13,7 @@ exports.UserSchema = new mongoose_1.default.Schema({
     username: String,
     isAdmin: { type: Boolean, default: false },
     isBanned: { type: Boolean, default: false },
+    verifiedChannels: { type: [Number], default: [] },
     joinedAt: { type: Date, default: Date.now },
     lastActiveAt: { type: Date, default: Date.now },
 });

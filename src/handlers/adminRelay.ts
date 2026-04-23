@@ -4,10 +4,14 @@ import {
   getAdminState, clearAdminState, setAdminState,
   addAdminId, removeAdminId,
   banUser, unbanUser, isUserBanned,
+<<<<<<< HEAD
   getSetting, setSetting
+=======
+  getRequiredChannels, addRequiredChannel,
+>>>>>>> ce00aa0 (/ban fixed and custme msg)
 } from "../utils/redis.js";
 import { UserModel, BroadcastModel } from "../models/index.js";
-import { setTargetChatId, setChannelLink } from "../utils/settings.js";
+import { setTargetChatId, setChannelLink, setWelcomeMessage, setFolderLink } from "../utils/settings.js";
 import { runBroadcast } from "./broadcast.js";
 import { adminMainKeyboard, cancelKeyboard, esc } from "../utils/format.js";
 import { checkAllChannels, getRequiredChannels, getWelcomeMessage, addVerifiedUser, isUserVerified, removeVerifiedUser } from "../utils/membership.js";
@@ -300,7 +304,7 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
     }
 
     if (successCount > 0) {
-      await ctx.reply("✅ _Your message has been sent to admins._", { parse_mode: PM });
+      // await ctx.reply("✅ _Your message has been sent to admins._", { parse_mode: PM });
     } else {
       await ctx.reply("❌ _Failed to reach any admin. Try again later._", { parse_mode: PM });
     }
@@ -367,11 +371,165 @@ export function setupAdminRelay(bot: Telegraf<Context>, adminSet: Set<number>) {
 
     const uid = ctx.from!.id;
 
+<<<<<<< HEAD
     switch (state.action) {
       case "add_admin": {
         const userId = parseInt(text, 10);
         if (isNaN(userId)) {
           return ctx.reply("❌ Invalid user ID. Send a numeric ID:", {
+=======
+    case "set_channel": {
+      const chatId = parseInt(text, 10);
+      if (isNaN(chatId)) {
+        return ctx.reply("❌ Invalid chat ID. Send a numeric ID:", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      await setTargetChatId(chatId);
+      await clearAdminState(uid);
+      return ctx.reply(`✅ *Channel ID set to:* \`${chatId}\``, {
+        parse_mode: PM,
+        reply_markup: adminMainKeyboard().reply_markup,
+      });
+    }
+
+case "set_link": {
+      if (!text.startsWith("https://t.me") && !text.startsWith("https://telegram.me")) {
+        return ctx.reply("❌ Invalid Telegram link. Example: `https://t.me/+xxxxx`:", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      await setChannelLink(text);
+      await clearAdminState(uid);
+      return ctx.reply("✅ *Channel invite link set.*", {
+        parse_mode: PM,
+        reply_markup: adminMainKeyboard().reply_markup,
+      });
+    }
+
+    case "set_welcome_msg": {
+      if (text === "❌ Cancel" || text === "/cancel") {
+        await clearAdminState(uid);
+        return ctx.reply("🔙 Welcome message unchanged.", {
+          parse_mode: PM,
+          reply_markup: adminMainKeyboard().reply_markup,
+        });
+      }
+      await setWelcomeMessage(text);
+      await clearAdminState(uid);
+      return ctx.reply("✅ *Welcome message set.*", {
+        parse_mode: PM,
+        reply_markup: adminMainKeyboard().reply_markup,
+      });
+    }
+
+    case "set_folder_link": {
+      if (text === "❌ Cancel" || text === "/cancel") {
+        await clearAdminState(uid);
+        return ctx.reply("🔙 Folder link unchanged.", {
+          parse_mode: PM,
+          reply_markup: adminMainKeyboard().reply_markup,
+        });
+      }
+      if (!text.includes("t.me") && !text.includes("telegram.me")) {
+        return ctx.reply("❌ Invalid link. Use format: https://t.me/...", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      await setFolderLink(text);
+      await clearAdminState(uid);
+      return ctx.reply("✅ *Folder link set.*", {
+        parse_mode: PM,
+        reply_markup: adminMainKeyboard().reply_markup,
+      });
+    }
+
+    case "add_channel": {
+      const data = state.data as { step?: string; name?: string; chatId?: number; inviteLink?: string } | undefined;
+      const step = data?.step;
+      
+      if (!step) {
+        await setAdminState(uid, { action: "add_channel", data: { step: "name" } });
+        return ctx.reply("📋 *Add Required Channel*\n\n_Step 1/3: Send the channel name_:", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      
+      if (step === "name") {
+        const name = text.trim();
+        if (!name) {
+          return ctx.reply("❌ Please send a valid name:", {
+            parse_mode: PM,
+            reply_markup: cancelKeyboard().reply_markup,
+          });
+        }
+        await setAdminState(uid, { action: "add_channel", data: { step: "chatId", name } });
+        return ctx.reply("📋 *Add Required Channel*\n\n_Step 2/3: Send the channel chat ID (numeric):_", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      
+      if (step === "chatId") {
+        const chatId = parseInt(text, 10);
+        if (isNaN(chatId)) {
+          return ctx.reply("❌ Invalid chat ID. Send a numeric ID:", {
+            parse_mode: PM,
+            reply_markup: cancelKeyboard().reply_markup,
+          });
+        }
+        const currentChannels = await getRequiredChannels();
+        if (currentChannels.some(c => c.chatId === chatId)) {
+          await clearAdminState(uid);
+          return ctx.reply("⚠️ This channel is already configured.", {
+            parse_mode: PM,
+            reply_markup: adminMainKeyboard().reply_markup,
+          });
+        }
+        await setAdminState(uid, { action: "add_channel", data: { step: "inviteLink", name: data?.name, chatId } });
+        return ctx.reply("📋 *Add Required Channel*\n\n_Step 3/3: Send the invite link (https://t.me/...):_", {
+          parse_mode: PM,
+          reply_markup: cancelKeyboard().reply_markup,
+        });
+      }
+      
+      if (step === "inviteLink") {
+        const inviteLink = text.trim();
+        if (!inviteLink.startsWith("https://t.me") && !inviteLink.startsWith("https://telegram.me") && !inviteLink.startsWith("t.me")) {
+          return ctx.reply("❌ Invalid link. Send format: `https://t.me/...`:", {
+            parse_mode: PM,
+            reply_markup: cancelKeyboard().reply_markup,
+          });
+        }
+        const finalLink = inviteLink.startsWith("http") ? inviteLink : `https://${inviteLink}`;
+        await addRequiredChannel(data.name!, data.chatId!, finalLink);
+        await clearAdminState(uid);
+        return ctx.reply(`✅ *Channel added:*\n\n*Name:* ${data.name}\n*ID:* \`${data.chatId}\`\n*Link:* ${finalLink}`, {
+          parse_mode: PM,
+          reply_markup: adminMainKeyboard().reply_markup,
+        });
+      }
+      break;
+    }
+
+    case "broadcast": {
+      const m = ctx.message as any;
+      const data = state.data as { step?: string; text?: string; photoFileId?: string; buttonText?: string } | undefined;
+
+      // Step 1: Receive message (text or photo)
+      if (!data?.text && !data?.photoFileId) {
+        const photo = m.photo?.[m.photo.length - 1];
+        const caption = m.caption || "";
+
+        if (photo) {
+          // Photo broadcast
+          await setAdminState(uid, { action: "broadcast", data: { step: "ask_button_text", text: caption, photoFileId: photo.file_id } });
+          return ctx.reply("📸 *Photo received.*\n\n_Send button text (or type *skip* to send without a button):_", {
+>>>>>>> ce00aa0 (/ban fixed and custme msg)
             parse_mode: PM,
             reply_markup: cancelKeyboard().reply_markup,
           });

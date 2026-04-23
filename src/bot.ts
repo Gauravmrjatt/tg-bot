@@ -1,15 +1,20 @@
-import { Telegraf, Context } from "telegraf";
+import { Telegraf, Context, Markup } from "telegraf";
 import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import pino from "pino";
 import { connectDb } from "./utils/db.js";
-import { connectRedis, getSetting, getAdminIds } from "./utils/redis.js";
+import { connectRedis, getSetting, getAdminIds, getRequiredChannels, addRequiredChannel, removeRequiredChannel, getUserVerifiedChannels, setUserVerifiedChannels } from "./utils/redis.js";
 import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
+<<<<<<< HEAD
 import { setupForceJoin } from "./handlers/forceJoin.js";
 import { getTargetChatId } from "./utils/settings.js";
 import { adminMainKeyboard, userMainKeyboard, cancelKeyboard, KB } from "./utils/format.js";
+=======
+import { getTargetChatId, getWelcomeMessage, setWelcomeMessage, getFolderLink } from "./utils/settings.js";
+import { adminMainKeyboard, userMainKeyboard, cancelKeyboard, KB, channelVerificationKeyboard, channelListKeyboard, removeKeyboard, viewChannelsKeyboard } from "./utils/format.js";
+>>>>>>> ce00aa0 (/ban fixed and custme msg)
 
 dotenv.config();
 
@@ -88,24 +93,74 @@ startActivityFlush();
 
 // --- /start — show main keyboard ---
 bot.start(async (ctx) => {
-  const isAdmin = AdminSet.has(ctx.from.id);
+  const userId = ctx.from.id;
+  const isAdmin = AdminSet.has(userId);
+  const requiredChannels = await getRequiredChannels();
+  const folderLink = await getFolderLink();
+
+  if (!isAdmin && requiredChannels.length > 0) {
+    const verifiedChatIds = await getUserVerifiedChannels(userId);
+    const verifiedSet = new Set(verifiedChatIds);
+    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+
+    if (!allJoined) {
+      let msg = "👋 *Welcome to OSM Support*\n\nTo use this bot, you must join these channels:\n\n";
+      for (const ch of requiredChannels) {
+        msg += `• [${ch.name}](${ch.inviteLink})\n`;
+      }
+      msg += "\n_After joining, click /start again to verify._";
+
+      return ctx.reply(msg, { parse_mode: KB, reply_markup: userMainKeyboard().reply_markup });
+    }
+  }
+
   const greeting = isAdmin
     ? "👋 *Hey admin, the bot is ready!*\n\nChoose an option below:"
-    : "👋 *Welcome to OSM Support*\n\nSend your loot screenshots here. If you have any issue or any questions, feel free to message.\n\n⚡ _You will receive a reply as soon as possible._";
-  const kb = isAdmin ? adminMainKeyboard() : userMainKeyboard();
-  return ctx.reply(greeting, { parse_mode: KB, reply_markup: kb.reply_markup });
+    : (await getWelcomeMessage()) || "👋 *Welcome to OSM Support*\n\nSend your loot screenshots here. If you have any issue or any questions, feel free to message.\n\n⚡ _You will receive a reply as soon as possible._";
+  return ctx.reply(greeting, { parse_mode: KB, reply_markup: isAdmin ? adminMainKeyboard().reply_markup : (folderLink ? userMainKeyboard().reply_markup : undefined) });
 });
 
 // --- Non-command /admin: interactive keyboard buttons ---
-bot.hears("🔗 Rejoin", async (ctx) => {
-  const inviteLink = await getSetting("channel_link");
-  if (!inviteLink) {
-    return ctx.reply("🔗 _Invite link is not configured._", { parse_mode: KB });
+bot.hears("📁 Join Channels", async (ctx) => {
+  const folderLink = await getFolderLink();
+
+  if (folderLink) {
+    return ctx.reply(`All Yaari Channels in One Folder\n\n` +
+      "Loot Deals\n" +
+      "Hidden Bugs\n" +
+      "Smart Tricks\n" +
+      "Best Offers\n" +
+      "High Payout Campaigns\n" +
+      "Fastest Updates\n" +
+      "Only Real Deals\n" +
+      "No Fake, No Time Waste\n\n" +
+      `Bas "Add Folder" pe click karo aur sab channels ek sath join karo\n\n` +
+      `Folder Link: ${folderLink}\n\n` +
+      "Jo already join kar chuke hain wo daily fayda le rahe hain\n" +
+      "Late aaye to loss pakka");
   }
-  return ctx.reply(`🔗 *Click to join:*\n\n${inviteLink}`, { parse_mode: KB });
+
+  return ctx.reply("No folder link set by admin.");
 });
 
 bot.hears("💬 Message Admin", async (ctx) => {
+  const userId = ctx.from.id;
+  const requiredChannels = await getRequiredChannels();
+
+  if (requiredChannels.length > 0 && !AdminSet.has(userId)) {
+    const verifiedChatIds = await getUserVerifiedChannels(userId);
+    const verifiedSet = new Set(verifiedChatIds);
+    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+
+    if (!allJoined) {
+      const greeting = "👋 *Welcome to OSM Support*\n\nTo use this bot, you must join our channels first.";
+      return ctx.reply(greeting, {
+        parse_mode: KB,
+        reply_markup: channelVerificationKeyboard(requiredChannels).reply_markup,
+      });
+    }
+  }
+
   await ctx.reply("💬 _Just type your message and it will be forwarded to admins._", {
     parse_mode: KB,
     reply_markup: cancelKeyboard().reply_markup,
@@ -181,13 +236,27 @@ bot.hears("⚙️ Config", async (ctx) => {
   if (!AdminSet.has(ctx.from.id)) return;
   const chatId = await getTargetChatId();
   const link = await getSetting("channel_link");
+  const welcomeMsg = await getWelcomeMessage();
   let c = "⚙️ *Current Config*\n\n";
   c += `*Channel ID:* ${chatId ? `\`${chatId}\`` : "_not set_"}\n`;
-  c += `*Invite Link:* ${link || "_not set_"}`;
+  c += `*Invite Link:* ${link || "_not set_"}\n`;
+  c += `*Welcome Msg:* ${welcomeMsg ? welcomeMsg.slice(0, 50) + "..." : "_not set_"}`;
   return ctx.reply(c, { parse_mode: KB });
 });
 
-bot.hears("📍 Set Channel", async (ctx) => {
+bot.hears("💬 Welcome Msg", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  const current = await getWelcomeMessage();
+  await ctx.reply(current 
+    ? `💬 *Current Welcome Message:*\n\n${current}\n\n_Send new message (or press Cancel to keep current):_`
+    : "💬 *Welcome Message:*\n\n_Send the welcome message to show users after they verify:_",
+    { parse_mode: KB, reply_markup: cancelKeyboard().reply_markup }
+  );
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "set_welcome_msg" });
+});
+
+bot.hears("📍 Approve Channel", async (ctx) => {
   if (!AdminSet.has(ctx.from.id)) return;
   await ctx.reply("📍 _Send the channel chat ID (numeric), or press Cancel._", {
     parse_mode: KB,
@@ -205,6 +274,18 @@ bot.hears("🔗 Set Link", async (ctx) => {
   });
   const { setAdminState } = await import("./utils/redis.js");
   await setAdminState(ctx.from.id, { action: "set_link" });
+});
+
+bot.hears("📁 Set Folder", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  const current = await getFolderLink();
+  await ctx.reply(current 
+    ? `📁 *Current Folder Link:*\n\n${current}\n\n_Send new folder link (or press Cancel to keep current):_`
+    : "📁 *Set Folder Link*\n\n_Send the Telegram folder link to add all channels at once:_",
+    { parse_mode: KB, reply_markup: cancelKeyboard().reply_markup }
+  );
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "set_folder_link" });
 });
 
 bot.hears("🚫 Ban User", async (ctx) => {
@@ -232,41 +313,117 @@ bot.hears("📋 List Banned", async (ctx) => {
   return showBannedList(ctx, 1);
 });
 
+bot.hears("📋 Manage Channels", async (ctx) => {
+  if (!AdminSet.has(ctx.from.id)) return;
+  const channels = await getRequiredChannels();
+  const { Markup } = await import("telegraf");
+  if (channels.length === 0) {
+    return ctx.reply("📋 No required channels configured.\n\nAdd one now?", {
+      parse_mode: KB,
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback("➕ Add Channel", "add_channel_flow")],
+        [Markup.button.callback("🔙 Back", "admin_back")],
+      ]).reply_markup,
+    });
+  }
+  let msg = "📋 *Required Channels*\n\n";
+  for (const ch of channels) {
+    msg += `• ${ch.name}\n`;
+  }
+  msg += `\nTotal: ${channels.length}`;
+  return ctx.reply(msg, {
+    parse_mode: KB,
+    reply_markup: channelListKeyboard(channels).reply_markup,
+  });
+});
+
+bot.action("add_channel_flow", async (ctx) => {
+  if (!AdminSet.has(ctx.callbackQuery.from.id)) return ctx.answerCbQuery("Not authorized.");
+  await ctx.answerCbQuery();
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  await ctx.reply("📋 *Add Required Channel*\n\n_Step 1/3: Send the channel name_:", {
+    parse_mode: KB,
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "add_channel", data: { step: "name" } });
+});
+
+bot.action(/^remove_channel:(\-?\d+)$/, async (ctx) => {
+  if (!AdminSet.has(ctx.callbackQuery.from.id)) return ctx.answerCbQuery("Not authorized.");
+  const chatId = parseInt(ctx.match[1]!, 10);
+  await ctx.answerCbQuery();
+  await removeRequiredChannel(chatId);
+  const channels = await getRequiredChannels();
+  if (channels.length === 0) {
+    await ctx.editMessageText("📋 No required channels configured.", {
+      reply_markup: channelListKeyboard([]).reply_markup,
+    });
+  } else {
+let msg = "📋 *Required Channels*\n\n";
+  for (const ch of channels) {
+    msg += `• ${ch.name} (${ch.chatId})\n`;
+  }
+    msg += `\nTotal: ${channels.length}`;
+    await ctx.editMessageText(msg, {
+      parse_mode: KB,
+      reply_markup: channelListKeyboard(channels).reply_markup,
+    });
+  }
+});
+
 async function showBannedList(ctx: any, page: number) {
   const { UserModel } = await import("./models/index.js");
   const { Markup } = await import("telegraf");
+
   const perPage = 10;
   const total = await UserModel.countDocuments({ isBanned: true });
+
   if (total === 0) {
-    return ctx.reply("📋 _No banned users._", { parse_mode: KB });
+    return ctx.reply("📋 No banned users.");
   }
+
   const totalPages = Math.ceil(total / perPage);
   if (page > totalPages) page = totalPages;
   if (page < 1) page = 1;
 
-  const banned = await UserModel.find({ isBanned: true }, { tgId: 1, username: 1, firstName: 1, lastName: 1 })
+  const banned = await UserModel.find(
+    { isBanned: true },
+    { tgId: 1, username: 1, firstName: 1, lastName: 1 }
+  )
     .sort({ _id: 1 })
     .skip((page - 1) * perPage)
     .limit(perPage)
     .lean();
 
-  let msg = `🚫 *Banned Users* (${total})\n`;
-  msg += `*Page* ${page}/${totalPages}\n\n`;
+  let msg = `🚫 Banned Users (${total})\n`;
+  msg += `Page ${page}/${totalPages}\n\n`;
+
   for (const u of banned) {
-    const name = `${u.firstName || ""} ${u.lastName || ""}`.trim() || "N/A";
+    const name =
+      `${u.firstName || ""} ${u.lastName || ""}`.trim() || "N/A";
     const un = u.username ? `@${u.username}` : "no username";
-    msg += `• \`${u.tgId}\` — ${name} (${un})\n`;
+
+    msg += `• ${u.tgId} — ${name} (${un})\n`;
   }
 
   const kb: any[][] = [];
   if (page > 1 || page < totalPages) {
     const row: any[] = [];
-    if (page > 1) row.push(Markup.button.callback("⬅️ Prev", `banned_list:${page - 1}`));
-    if (page < totalPages) row.push(Markup.button.callback("Next ➡️", `banned_list:${page + 1}`));
+    if (page > 1)
+      row.push(
+        Markup.button.callback("⬅️ Prev", `banned_list:${page - 1}`)
+      );
+    if (page < totalPages)
+      row.push(
+        Markup.button.callback("Next ➡️", `banned_list:${page + 1}`)
+      );
     kb.push(row);
   }
 
-  return ctx.reply(msg, { parse_mode: KB, reply_markup: { inline_keyboard: kb } });
+  return ctx.reply(msg, {
+    reply_markup: { inline_keyboard: kb },
+  });
 }
 
 bot.action(/^banned_list:(\d+)$/, async (ctx) => {
@@ -274,6 +431,61 @@ bot.action(/^banned_list:(\d+)$/, async (ctx) => {
   const page = parseInt(ctx.match[1], 10);
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
   await showBannedList(ctx, page);
+});
+
+bot.action("verify_channels", async (ctx) => {
+  const userId = ctx.callbackQuery.from.id;
+  if (AdminSet.has(userId)) return ctx.answerCbQuery("Admins bypass verification.");
+
+  const requiredChannels = await getRequiredChannels();
+  if (requiredChannels.length === 0) {
+    await ctx.answerCbQuery("No channels required.");
+    return ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  }
+
+  const missing: { chatId: number; name: string; inviteLink: string }[] = [];
+  for (const ch of requiredChannels) {
+    try {
+      const member = await bot.telegram.getChatMember(ch.chatId, userId);
+      if (member.status === "left" || member.status === "kicked") {
+        missing.push(ch);
+      }
+    } catch {
+      missing.push(ch);
+    }
+  }
+
+  if (missing.length > 0) {
+    await ctx.answerCbQuery();
+    let msg = "❌ *You haven't joined these channels:*\n\n";
+    for (const ch of missing) {
+      msg += `• [${ch.name}](${ch.inviteLink})\n`;
+    }
+    msg += "\n_Please join and run /start again._";
+    await ctx.editMessageText(msg, { parse_mode: KB });
+  } else {
+    await ctx.answerCbQuery("Verified!");
+    const verifiedChatIds = requiredChannels.map(ch => ch.chatId);
+    await setUserVerifiedChannels(userId, verifiedChatIds);
+    const welcomeMsg = await getWelcomeMessage();
+    const greeting = welcomeMsg || "👋 *Welcome to OSM Support*\n\nSend your loot screenshots here. If you have any issue or any questions, feel free to message.\n\n⚡ _You will receive a reply as soon as possible._";
+    await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
+    return ctx.reply(greeting, { parse_mode: KB });
+  }
+});
+
+bot.action("view_channels", async (ctx) => {
+  await ctx.answerCbQuery("Just click the channel links in the message!");
+});
+
+bot.action("admin_back", async (ctx) => {
+  if (!AdminSet.has(ctx.callbackQuery.from.id)) return ctx.answerCbQuery("Not authorized.");
+  await ctx.answerCbQuery();
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  await ctx.reply("👋 *Hey admin, the bot is ready!*\n\nChoose an option below:", {
+    parse_mode: KB,
+    reply_markup: adminMainKeyboard().reply_markup,
+  });
 });
 
 bot.hears("❌ Cancel", async (ctx) => {
@@ -287,6 +499,23 @@ bot.hears("❌ Cancel", async (ctx) => {
 
 // --- Manual command overrides (still work if typed) ---
 bot.command("rejoin", async (ctx) => {
+  const requiredChannels = await getRequiredChannels();
+  const userId = ctx.from.id;
+
+  if (requiredChannels.length > 0) {
+    const verifiedChatIds = await getUserVerifiedChannels(userId);
+    const verifiedSet = new Set(verifiedChatIds);
+    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+
+    if (!allJoined) {
+      const greeting = "👋 *Welcome to OSM Support*\n\nTo use this bot, you must join our channels first.";
+      return ctx.reply(greeting, {
+        parse_mode: KB,
+        reply_markup: channelVerificationKeyboard(requiredChannels).reply_markup,
+      });
+    }
+  }
+
   const inviteLink = await getSetting("channel_link");
   if (!inviteLink) return ctx.reply("Invite link is not configured.");
   return ctx.reply(`Here's the invite link: ${inviteLink}`);
@@ -351,25 +580,25 @@ bot.command("autoapprove", async (ctx) => {
   return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: KB });
 });
 
-bot.command("ban", async (ctx) => {
-  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
-  await ctx.reply("🚫 _Send the user ID to ban._", {
-    parse_mode: KB,
-    reply_markup: cancelKeyboard().reply_markup,
-  });
-  const { setAdminState } = await import("./utils/redis.js");
-  await setAdminState(ctx.from.id, { action: "ban_user" });
-});
+// bot.command("ban", async (ctx) => {
+//   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+//   await ctx.reply("🚫 _Send the user ID to ban._", {
+//     parse_mode: KB,
+//     reply_markup: cancelKeyboard().reply_markup,
+//   });
+//   const { setAdminState } = await import("./utils/redis.js");
+//   await setAdminState(ctx.from.id, { action: "ban_user" });
+// });
 
-bot.command("unban", async (ctx) => {
-  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
-  await ctx.reply("✅ _Send the user ID to unban._", {
-    parse_mode: KB,
-    reply_markup: cancelKeyboard().reply_markup,
-  });
-  const { setAdminState } = await import("./utils/redis.js");
-  await setAdminState(ctx.from.id, { action: "unban_user" });
-});
+// bot.command("unban", async (ctx) => {
+//   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+//   await ctx.reply("✅ _Send the user ID to unban._", {
+//     parse_mode: KB,
+//     reply_markup: cancelKeyboard().reply_markup,
+//   });
+//   const { setAdminState } = await import("./utils/redis.js");
+//   await setAdminState(ctx.from.id, { action: "unban_user" });
+// });
 
 // Setup feature handlers
 function setup(bot: any, AdminSet: Set<number>) {

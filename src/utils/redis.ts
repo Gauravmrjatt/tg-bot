@@ -1,5 +1,5 @@
 import Redis from "ioredis";
-import { GlobalSettingsModel } from "../models/index.js";
+import { GlobalSettingsModel, UserModel } from "../models/index.js";
 
 export let redis: Redis;
 
@@ -126,4 +126,40 @@ export async function unbanUser(userId: number) {
 export async function getBannedUserIds(): Promise<number[]> {
   const raw = await redis.smembers("banned:users");
   return raw.map(Number);
+}
+
+export interface RequiredChannel {
+  name: string;
+  chatId: number;
+  inviteLink: string;
+}
+
+export async function getRequiredChannels(): Promise<RequiredChannel[]> {
+  const data = await redis.get("required_channels");
+  return data ? JSON.parse(data) : [];
+}
+
+export async function addRequiredChannel(name: string, chatId: number, inviteLink: string): Promise<void> {
+  const channels = await getRequiredChannels();
+  if (channels.some(c => c.chatId === chatId)) return;
+  channels.push({ name, chatId, inviteLink });
+  await redis.set("required_channels", JSON.stringify(channels));
+}
+
+export async function removeRequiredChannel(chatId: number): Promise<void> {
+  const channels = await getRequiredChannels();
+  const filtered = channels.filter(c => c.chatId !== chatId);
+  await redis.set("required_channels", JSON.stringify(filtered));
+}
+
+export async function getUserVerifiedChannels(userId: number): Promise<number[]> {
+  const data = await redis.get(`verified_channels:${userId}`);
+  if (data) return JSON.parse(data);
+  const user = await UserModel.findOne({ tgId: userId });
+  return user?.verifiedChannels || [];
+}
+
+export async function setUserVerifiedChannels(userId: number, chatIds: number[]): Promise<void> {
+  await redis.set(`verified_channels:${userId}`, JSON.stringify(chatIds));
+  await UserModel.updateOne({ tgId: userId }, { $set: { verifiedChannels: chatIds } }, { upsert: true });
 }

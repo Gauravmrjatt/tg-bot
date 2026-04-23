@@ -16,3 +16,19 @@ export async function getChannelLink(): Promise<string | null> {
 export async function setChannelLink(link: string) {
   await setSetting("channel_link", link);
 }
+
+export async function getWelcomeMessage(): Promise<string | null> {
+  return getSetting("welcome_message");
+}
+
+export async function setWelcomeMessage(msg: string) {
+  await setSetting("welcome_message", msg);
+}
+
+export async function getFolderLink(): Promise<string | null> {
+  return getSetting("folder_link");
+}
+
+export async function setFolderLink(link: string) {
+  await setSetting("folder_link", link);
+}
