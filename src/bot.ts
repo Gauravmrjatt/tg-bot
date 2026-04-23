@@ -433,17 +433,30 @@ bot.action("verify_channels", async (ctx) => {
     return ctx.editMessageReplyMarkup({ inline_keyboard: [] });
   }
   
+  // Check if bot can verify (is admin in channel)
+  let canVerify = true;
   const missing: string[] = [];
   for (const ch of requiredChannels) {
-    let isMember = false;
     try {
       const member = await bot.telegram.getChatMember(ch.chatId, userId);
-      isMember = member.status !== "left" && member.status !== "kicked";
+      if (member.status === "left" || member.status === "kicked") {
+        missing.push(ch.name);
+      }
     } catch (e) {
-      // Bot not admin - can't verify, assume not joined
-      console.log("Cannot verify user - bot not admin in channel:", ch.chatId);
+      // Bot not admin - can't verify
+      console.log("Cannot verify - bot not admin:", ch.chatId);
+      canVerify = false;
     }
-    if (!isMember) missing.push(ch.name);
+  }
+  
+  if (!canVerify) {
+    // Bot not admin - just verify user without checking
+    // User self-reports they joined
+    await ctx.answerCbQuery("Verified! (self-reported)");
+    await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
+    const greeting = (await getWelcomeMessage()) || "Welcome! You can now message admin.";
+    await ctx.reply(greeting, { reply_markup: userMainKeyboard().reply_markup });
+    return;
   }
   
   if (missing.length > 0) {
