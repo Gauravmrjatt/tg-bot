@@ -121,26 +121,15 @@ bot.start(async (ctx) => {
     const userId = ctx.from.id;
     const isAdmin = AdminSet.has(userId);
     const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
-    const folderLink = await (0, settings_js_1.getFolderLink)();
     if (!isAdmin && requiredChannels.length > 0) {
-        const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
-        const verifiedSet = new Set(verifiedChatIds);
-        const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
-        if (!allJoined) {
-            const rows = [];
-            if (folderLink) {
-                rows.push([telegraf_1.Markup.button.url("Join Channels", folderLink)]);
-            }
-            else {
-                for (const ch of requiredChannels) {
-                    rows.push([telegraf_1.Markup.button.url("Join " + ch.name, ch.inviteLink)]);
-                }
-            }
-            rows.push([telegraf_1.Markup.button.callback("I Have Joined", "verify_channels")]);
-            return ctx.reply("Join our channels first, then click I Have Joined.", {
-                reply_markup: { inline_keyboard: rows },
-            });
+        const rows = [];
+        for (const ch of requiredChannels) {
+            rows.push([telegraf_1.Markup.button.url("Join " + ch.name, ch.inviteLink)]);
         }
+        rows.push([telegraf_1.Markup.button.callback("I Have Joined", "verify_channels")]);
+        return ctx.reply("Join all channels below, then click I Have Joined. You must join all to message admin.", {
+            reply_markup: { inline_keyboard: rows },
+        });
     }
     const greeting = isAdmin
         ? "Hey admin, the bot is ready! Choose an option below:"
@@ -198,14 +187,11 @@ bot.hears("💬 Message Admin", async (ctx) => {
         const verifiedSet = new Set(verifiedChatIds);
         const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
         if (!allJoined) {
-            const folderLink = await (0, settings_js_1.getFolderLink)();
-            if (folderLink) {
-                return ctx.reply("Join our channels first:\n\n" + folderLink);
-            }
-            let msg = "Join these channels first:\n\n";
+            let msg = "Join all channels first:\n\n";
             for (const ch of requiredChannels) {
                 msg += "- " + ch.name + "\n";
             }
+            msg += "\nThen click /verify";
             return ctx.reply(msg);
         }
     }
@@ -451,8 +437,7 @@ bot.action("verify_channels", async (ctx) => {
     if (AdminSet.has(userId))
         return ctx.answerCbQuery("Admins bypass.");
     const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
-    const folderLink = await (0, settings_js_1.getFolderLink)();
-    if (requiredChannels.length === 0 && !folderLink) {
+    if (requiredChannels.length === 0) {
         await ctx.answerCbQuery("No channels required.");
         return ctx.editMessageReplyMarkup({ inline_keyboard: [] });
     }
@@ -469,9 +454,9 @@ bot.action("verify_channels", async (ctx) => {
         }
     }
     if (missing.length > 0) {
-        await ctx.answerCbQuery("You haven't joined all channels.");
+        await ctx.answerCbQuery("Join all channels first!");
         let msg = "You haven't joined:\n" + missing.map(n => "- " + n).join("\n");
-        msg += "\n\nJoin and try again.";
+        msg += "\n\nJoin all and click I Have Joined again.";
         await ctx.editMessageText(msg);
     }
     else {
@@ -479,7 +464,7 @@ bot.action("verify_channels", async (ctx) => {
         await (0, redis_js_1.setUserVerifiedChannels)(userId, verifiedChatIds);
         await ctx.answerCbQuery("Verified!");
         await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
-        const greeting = (await (0, settings_js_1.getWelcomeMessage)()) || "Welcome to OSM Support. Send your loot screenshots here.";
+        const greeting = (await (0, settings_js_1.getWelcomeMessage)()) || "Welcome! You can now message admin.";
         await ctx.reply(greeting, { reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup });
     }
 });
