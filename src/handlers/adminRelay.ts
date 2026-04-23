@@ -475,6 +475,54 @@ case "set_link": {
         });
       }
 
+      case "add_channel": {
+        const data = state.data as { step?: string; name?: string; chatId?: number; inviteLink?: string } | undefined;
+        const step = data?.step;
+        
+        if (!step) {
+          await setAdminState(uid, { action: "add_channel", data: { step: "name" } });
+          return ctx.reply("Add Channel - Step 1/3: Send the channel name:", {
+            reply_markup: cancelKeyboard().reply_markup,
+          });
+        }
+        
+        if (step === "name") {
+          const name = text.trim();
+          if (!name) return ctx.reply("Invalid name.", { reply_markup: cancelKeyboard().reply_markup });
+          await setAdminState(uid, { action: "add_channel", data: { step: "chatId", name } });
+          return ctx.reply("Add Channel - Step 2/3: Send the channel chat ID:", {
+            reply_markup: cancelKeyboard().reply_markup,
+          });
+        }
+        
+        if (step === "chatId") {
+          const chatId = parseInt(text, 10);
+          if (isNaN(chatId)) return ctx.reply("Invalid chat ID.", { reply_markup: cancelKeyboard().reply_markup });
+          const currentChannels = await getRequiredChannels();
+          if (currentChannels.some(c => c.chatId === chatId)) {
+            await clearAdminState(uid);
+            return ctx.reply("Channel already configured.", { reply_markup: adminMainKeyboard().reply_markup });
+          }
+          await setAdminState(uid, { action: "add_channel", data: { step: "inviteLink", name: data?.name, chatId } });
+          return ctx.reply("Add Channel - Step 3/3: Send the invite link:", {
+            reply_markup: cancelKeyboard().reply_markup,
+          });
+        }
+        
+        if (step === "inviteLink") {
+          const inviteLink = text.trim();
+          if (!inviteLink.startsWith("http")) {
+            return ctx.reply("Invalid link.", { reply_markup: cancelKeyboard().reply_markup });
+          }
+          await addRequiredChannel(data.name!, data.chatId!, inviteLink);
+          await clearAdminState(uid);
+          return ctx.reply("Channel added: " + data.name, {
+            reply_markup: adminMainKeyboard().reply_markup,
+          });
+        }
+        break;
+      }
+
       case "broadcast": {
         const m = ctx.message as any;
         const data = state.data as { step?: string; text?: string; photoFileId?: string; buttonText?: string } | undefined;

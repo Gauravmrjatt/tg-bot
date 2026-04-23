@@ -417,6 +417,51 @@ function setupAdminRelay(bot, adminSet) {
                     reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
                 });
             }
+            case "add_channel": {
+                const data = state.data;
+                const step = data?.step;
+                if (!step) {
+                    await (0, redis_js_1.setAdminState)(uid, { action: "add_channel", data: { step: "name" } });
+                    return ctx.reply("Add Channel - Step 1/3: Send the channel name:", {
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (step === "name") {
+                    const name = text.trim();
+                    if (!name)
+                        return ctx.reply("Invalid name.", { reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup });
+                    await (0, redis_js_1.setAdminState)(uid, { action: "add_channel", data: { step: "chatId", name } });
+                    return ctx.reply("Add Channel - Step 2/3: Send the channel chat ID:", {
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (step === "chatId") {
+                    const chatId = parseInt(text, 10);
+                    if (isNaN(chatId))
+                        return ctx.reply("Invalid chat ID.", { reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup });
+                    const currentChannels = await (0, redis_js_1.getRequiredChannels)();
+                    if (currentChannels.some(c => c.chatId === chatId)) {
+                        await (0, redis_js_1.clearAdminState)(uid);
+                        return ctx.reply("Channel already configured.", { reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup });
+                    }
+                    await (0, redis_js_1.setAdminState)(uid, { action: "add_channel", data: { step: "inviteLink", name: data?.name, chatId } });
+                    return ctx.reply("Add Channel - Step 3/3: Send the invite link:", {
+                        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
+                    });
+                }
+                if (step === "inviteLink") {
+                    const inviteLink = text.trim();
+                    if (!inviteLink.startsWith("http")) {
+                        return ctx.reply("Invalid link.", { reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup });
+                    }
+                    await (0, redis_js_1.addRequiredChannel)(data.name, data.chatId, inviteLink);
+                    await (0, redis_js_1.clearAdminState)(uid);
+                    return ctx.reply("Channel added: " + data.name, {
+                        reply_markup: (0, format_js_1.adminMainKeyboard)().reply_markup,
+                    });
+                }
+                break;
+            }
             case "broadcast": {
                 const m = ctx.message;
                 const data = state.data;

@@ -3,7 +3,7 @@ import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import pino from "pino";
 import { connectDb } from "./utils/db.js";
-import { connectRedis, getSetting, getAdminIds, getRequiredChannels, getUserVerifiedChannels, setUserVerifiedChannels } from "./utils/redis.js";
+import { connectRedis, getSetting, getAdminIds, getRequiredChannels, getUserVerifiedChannels, setUserVerifiedChannels, removeRequiredChannel } from "./utils/redis.js";
 import { UserModel } from "./models/index.js";
 import { setupJoinRequest } from "./handlers/joinRequest.js";
 import { setupAdminRelay } from "./handlers/adminRelay.js";
@@ -156,16 +156,23 @@ bot.hears("📁 Set Folder", async (ctx) => {
 bot.hears("📋 Manage Channels", async (ctx) => {
   if (!AdminSet.has(ctx.from.id)) return;
   const channels = await getRequiredChannels();
-  if (channels.length === 0) {
-    return ctx.reply("No required channels configured. Add one?", {
-      reply_markup: cancelKeyboard().reply_markup,
-    });
-  }
+  
   let msg = "Required Channels\n\n";
-  for (const ch of channels) {
-    msg += "- " + ch.name + " (" + ch.chatId + ")\n";
+  if (channels.length === 0) {
+    msg += "No channels configured.";
+  } else {
+    for (const ch of channels) {
+      msg += "- " + ch.name + " (" + ch.chatId + ")\n";
+    }
   }
-  return ctx.reply(msg);
+  
+  const rows: any[][] = [];
+  for (const ch of channels) {
+    rows.push([Markup.button.callback("Remove " + ch.name, "remove_channel:" + ch.chatId)]);
+  }
+  rows.push([Markup.button.callback("Add Channel", "add_channel_flow")]);
+  
+  return ctx.reply(msg, { reply_markup: { inline_keyboard: rows } });
 });
 
 bot.hears("🔗 Set Link", async (ctx) => {
@@ -347,6 +354,38 @@ bot.action(/^banned_list:(\d+)$/, async (ctx) => {
   const page = parseInt(ctx.match[1], 10);
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
   await showBannedList(ctx, page);
+});
+
+bot.action("add_channel_flow", async (ctx) => {
+  if (!AdminSet.has(ctx.callbackQuery.from.id)) return ctx.answerCbQuery("Not authorized.");
+  await ctx.answerCbQuery();
+  await ctx.reply("Add Channel - Step 1/3: Send the channel name:", {
+    reply_markup: cancelKeyboard().reply_markup,
+  });
+  const { setAdminState } = await import("./utils/redis.js");
+  await setAdminState(ctx.from.id, { action: "add_channel", data: { step: "name" } });
+});
+
+bot.action(/^remove_channel:(\-?\d+)$/, async (ctx) => {
+  if (!AdminSet.has(ctx.callbackQuery.from.id)) return ctx.answerCbQuery("Not authorized.");
+  const chatId = parseInt(ctx.match[1], 10);
+  await removeRequiredChannel(chatId);
+  await ctx.answerCbQuery("Channel removed!");
+  const channels = await getRequiredChannels();
+  let msg = "Required Channels\n\n";
+  if (channels.length === 0) {
+    msg += "No channels configured.";
+  } else {
+    for (const ch of channels) {
+      msg += "- " + ch.name + " (" + ch.chatId + ")\n";
+    }
+  }
+  const rows: any[][] = [];
+  for (const ch of channels) {
+    rows.push([Markup.button.callback("Remove " + ch.name, "remove_channel:" + ch.chatId)]);
+  }
+  rows.push([Markup.button.callback("Add Channel", "add_channel_flow")]);
+  await ctx.editMessageText(msg, { reply_markup: { inline_keyboard: rows } });
 });
 
 bot.hears("❌ Cancel", async (ctx) => {
