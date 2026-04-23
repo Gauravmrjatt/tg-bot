@@ -122,20 +122,25 @@ bot.start(async (ctx) => {
     const isAdmin = AdminSet.has(userId);
     const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
     const folderLink = await (0, settings_js_1.getFolderLink)();
-    if (!isAdmin && (requiredChannels.length > 0 || folderLink)) {
-        const rows = [];
-        if (folderLink) {
-            rows.push([telegraf_1.Markup.button.url("Join Channels", folderLink)]);
-        }
-        else if (requiredChannels.length > 0) {
-            for (const ch of requiredChannels) {
-                rows.push([telegraf_1.Markup.button.url("Join " + ch.name, ch.inviteLink)]);
+    if (!isAdmin && requiredChannels.length > 0) {
+        const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
+        const verifiedSet = new Set(verifiedChatIds);
+        const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+        if (!allJoined) {
+            const rows = [];
+            if (folderLink) {
+                rows.push([telegraf_1.Markup.button.url("Join Channels", folderLink)]);
             }
+            else {
+                for (const ch of requiredChannels) {
+                    rows.push([telegraf_1.Markup.button.url("Join " + ch.name, ch.inviteLink)]);
+                }
+            }
+            rows.push([telegraf_1.Markup.button.callback("I Have Joined", "verify_channels")]);
+            return ctx.reply("Join our channels first, then click I Have Joined.", {
+                reply_markup: { inline_keyboard: rows },
+            });
         }
-        rows.push([telegraf_1.Markup.button.callback("I Have Joined", "verify_channels")]);
-        return ctx.reply("Join our channels first, then click I Have Joined.", {
-            reply_markup: { inline_keyboard: rows },
-        });
     }
     const greeting = isAdmin
         ? "Hey admin, the bot is ready! Choose an option below:"

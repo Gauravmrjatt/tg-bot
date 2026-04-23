@@ -97,21 +97,27 @@ bot.start(async (ctx) => {
   const requiredChannels = await getRequiredChannels();
   const folderLink = await getFolderLink();
   
-  if (!isAdmin && (requiredChannels.length > 0 || folderLink)) {
-    const rows: any[][] = [];
+  if (!isAdmin && requiredChannels.length > 0) {
+    const verifiedChatIds = await getUserVerifiedChannels(userId);
+    const verifiedSet = new Set(verifiedChatIds);
+    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
     
-    if (folderLink) {
-      rows.push([Markup.button.url("Join Channels", folderLink)]);
-    } else if (requiredChannels.length > 0) {
-      for (const ch of requiredChannels) {
-        rows.push([Markup.button.url("Join " + ch.name, ch.inviteLink)]);
+    if (!allJoined) {
+      const rows: any[][] = [];
+      
+      if (folderLink) {
+        rows.push([Markup.button.url("Join Channels", folderLink)]);
+      } else {
+        for (const ch of requiredChannels) {
+          rows.push([Markup.button.url("Join " + ch.name, ch.inviteLink)]);
+        }
       }
+      rows.push([Markup.button.callback("I Have Joined", "verify_channels")]);
+      
+      return ctx.reply("Join our channels first, then click I Have Joined.", {
+        reply_markup: { inline_keyboard: rows },
+      });
     }
-    rows.push([Markup.button.callback("I Have Joined", "verify_channels")]);
-    
-    return ctx.reply("Join our channels first, then click I Have Joined.", {
-      reply_markup: { inline_keyboard: rows },
-    });
   }
   
   const greeting = isAdmin
