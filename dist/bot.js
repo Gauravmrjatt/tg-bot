@@ -118,7 +118,25 @@ bot.on("message", async (ctx, next) => {
 startActivityFlush();
 // --- /start — show main keyboard ---
 bot.start(async (ctx) => {
-    const isAdmin = AdminSet.has(ctx.from.id);
+    const userId = ctx.from.id;
+    const isAdmin = AdminSet.has(userId);
+    const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+    if (!isAdmin && requiredChannels.length > 0) {
+        const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
+        const verifiedSet = new Set(verifiedChatIds);
+        const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+        if (!allJoined) {
+            const folderLink = await (0, settings_js_1.getFolderLink)();
+            if (folderLink) {
+                return ctx.reply("Join our channels first:\n\n" + folderLink);
+            }
+            let msg = "Join these channels first:\n\n";
+            for (const ch of requiredChannels) {
+                msg += "- " + ch.name + "\n";
+            }
+            return ctx.reply(msg);
+        }
+    }
     const greeting = isAdmin
         ? "Hey admin, the bot is ready! Choose an option below:"
         : (await (0, settings_js_1.getWelcomeMessage)()) || "Welcome to OSM Support. Send your loot screenshots here.";
@@ -129,16 +147,29 @@ bot.start(async (ctx) => {
 bot.hears("📁 Join Channels", async (ctx) => {
     const folderLink = await (0, settings_js_1.getFolderLink)();
     if (folderLink) {
-        return ctx.reply("All Yaari Channels in One Folder\n\n" +
-            "Loot Deals\nHidden Bugs\nSmart Tricks\nBest Offers\nHigh Payout Campaigns\n" +
-            "Fastest Updates\nOnly Real Deals\nNo Fake, No Time Waste\n\n" +
-            "Bas Add Folder pe click karo aur sab channels ek sath join karo\n\n" +
-            "Folder Link: " + folderLink + "\n\n" +
-            "Jo already join kar chuke hain wo daily fayda le rahe hain\nLate aaye to loss pakka");
+        return ctx.reply(folderLink);
     }
     return ctx.reply("No folder link set by admin.");
 });
 bot.hears("💬 Message Admin", async (ctx) => {
+    const userId = ctx.from.id;
+    const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+    if (requiredChannels.length > 0 && !AdminSet.has(userId)) {
+        const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
+        const verifiedSet = new Set(verifiedChatIds);
+        const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+        if (!allJoined) {
+            const folderLink = await (0, settings_js_1.getFolderLink)();
+            if (folderLink) {
+                return ctx.reply("Join our channels first:\n\n" + folderLink);
+            }
+            let msg = "Join these channels first:\n\n";
+            for (const ch of requiredChannels) {
+                msg += "- " + ch.name + "\n";
+            }
+            return ctx.reply(msg);
+        }
+    }
     await ctx.reply("Just type your message and it will be forwarded to admins.", {
         reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
     });
@@ -483,26 +514,24 @@ bot.command("autoapprove", async (ctx) => {
     await setAutoApprove(!current);
     return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: format_js_1.KB });
 });
-bot.command("ban", async (ctx) => {
-    if (!AdminSet.has(ctx.from.id))
-        return ctx.reply("Admin only.");
-    await ctx.reply("🚫 _Send the user ID to ban._", {
-        parse_mode: format_js_1.KB,
-        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-    });
-    const { setAdminState } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
-    await setAdminState(ctx.from.id, { action: "ban_user" });
-});
-bot.command("unban", async (ctx) => {
-    if (!AdminSet.has(ctx.from.id))
-        return ctx.reply("Admin only.");
-    await ctx.reply("✅ _Send the user ID to unban._", {
-        parse_mode: format_js_1.KB,
-        reply_markup: (0, format_js_1.cancelKeyboard)().reply_markup,
-    });
-    const { setAdminState } = await Promise.resolve().then(() => __importStar(require("./utils/redis.js")));
-    await setAdminState(ctx.from.id, { action: "unban_user" });
-});
+// bot.command("ban", async (ctx) => {
+//   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+//   await ctx.reply("🚫 _Send the user ID to ban._", {
+//     parse_mode: KB,
+//     reply_markup: cancelKeyboard().reply_markup,
+//   });
+//   const { setAdminState } = await import("./utils/redis.js");
+//   await setAdminState(ctx.from.id, { action: "ban_user" });
+// });
+// bot.command("unban", async (ctx) => {
+//   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+//   await ctx.reply("✅ _Send the user ID to unban._", {
+//     parse_mode: KB,
+//     reply_markup: cancelKeyboard().reply_markup,
+//   });
+//   const { setAdminState } = await import("./utils/redis.js");
+//   await setAdminState(ctx.from.id, { action: "unban_user" });
+// });
 // Setup feature handlers
 function setup(bot, AdminSet) {
     (0, joinRequest_js_1.setupJoinRequest)(bot, AdminSet);
