@@ -26,7 +26,7 @@ function adminMainKeyboard() {
         ["📍 Approve Channel", "🔗 Set Link"],
         ["📁 Set Folder", "💬 Welcome Msg"],
         ["📋 Manage Channels", "🚫 Ban User"],
-        ["✅ Unban User"],
+        ["✅ Unban User", "📋 List Banned"],
     ]).resize();
 }
 function cancelKeyboard() {
