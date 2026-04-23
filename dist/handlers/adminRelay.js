@@ -205,7 +205,7 @@ function setupAdminRelay(bot, adminSet) {
                     }
                     try {
                         await bot.telegram.copyMessage(userId, ctx.chat.id, ctx.message.message_id);
-                        // await ctx.reply(`✅ _Reply sent to user_ \`${userId}\``, { parse_mode: PM });
+                        await ctx.reply(`✅ _Reply sent to user_ \`${userId}\``, { parse_mode: PM });
                     }
                     catch (err) {
                         const errMsg = err.response?.description || err.message || "Unknown";

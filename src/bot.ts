@@ -37,10 +37,15 @@ const envAdmins = (process.env.ADMIN_IDS || "")
 const AdminSet = new Set<number>();
 envAdmins.forEach((id) => AdminSet.add(id));
 
-// Load admin IDs from DB at startup
+// Load admin IDs from Redis at startup, fallback to MongoDB
 async function loadAdmins() {
+  // First try Redis
   const dbAdmins = await getAdminIds();
   dbAdmins.forEach((id) => AdminSet.add(id));
+  
+  // Also check MongoDB for users marked as admin
+  const mongoAdmins = await UserModel.find({ isAdmin: true }).lean();
+  mongoAdmins.forEach((u) => AdminSet.add(u.tgId));
 }
 
 const bot = new Telegraf<Context>(TOKEN);
@@ -463,6 +468,7 @@ async function main() {
   app.use(express.json({ limit: "50mb" }));
 
   app.post(WEBHOOK_PATH, (req: Request, res: Response) => {
+    console.log("wehbook")
     bot.handleUpdate(req.body, res).catch((err) => {
       logger.error({ err }, "Webhook handler error");
     });
