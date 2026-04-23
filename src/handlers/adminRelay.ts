@@ -242,10 +242,14 @@ const state = await getAdminState(ctx.from.id);
     const userId = ctx.from.id;
 
     const requiredChannels = await getRequiredChannels();
+    console.log("User", userId, "requiredChannels:", requiredChannels.length);
+    
     if (requiredChannels.length > 0) {
       const verifiedChatIds = await getUserVerifiedChannels(userId);
+      console.log("User", userId, "verifiedChatIds:", verifiedChatIds);
       const verifiedSet = new Set(verifiedChatIds);
       const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+      console.log("User", userId, "allJoined:", allJoined);
       if (!allJoined) {
         let msg = "Join all channels first:\n\n";
         for (const ch of requiredChannels) {

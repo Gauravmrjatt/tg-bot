@@ -192,10 +192,13 @@ function setupAdminRelay(bot, adminSet) {
             return next();
         const userId = ctx.from.id;
         const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+        console.log("User", userId, "requiredChannels:", requiredChannels.length);
         if (requiredChannels.length > 0) {
             const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
+            console.log("User", userId, "verifiedChatIds:", verifiedChatIds);
             const verifiedSet = new Set(verifiedChatIds);
             const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+            console.log("User", userId, "allJoined:", allJoined);
             if (!allJoined) {
                 let msg = "Join all channels first:\n\n";
                 for (const ch of requiredChannels) {
