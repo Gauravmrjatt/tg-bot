@@ -92,7 +92,28 @@ startActivityFlush();
 
 // --- /start — show main keyboard ---
 bot.start(async (ctx) => {
-  const isAdmin = AdminSet.has(ctx.from.id);
+  const userId = ctx.from.id;
+  const isAdmin = AdminSet.has(userId);
+  const requiredChannels = await getRequiredChannels();
+  
+  if (!isAdmin && requiredChannels.length > 0) {
+    const verifiedChatIds = await getUserVerifiedChannels(userId);
+    const verifiedSet = new Set(verifiedChatIds);
+    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+    
+    if (!allJoined) {
+      const folderLink = await getFolderLink();
+      if (folderLink) {
+        return ctx.reply("Join our channels first:\n\n" + folderLink);
+      }
+      let msg = "Join these channels first:\n\n";
+      for (const ch of requiredChannels) {
+        msg += "- " + ch.name + "\n";
+      }
+      return ctx.reply(msg);
+    }
+  }
+  
   const greeting = isAdmin
     ? "Hey admin, the bot is ready! Choose an option below:"
     : (await getWelcomeMessage()) || "Welcome to OSM Support. Send your loot screenshots here.";
@@ -110,6 +131,27 @@ bot.hears("📁 Join Channels", async (ctx) => {
 });
 
 bot.hears("💬 Message Admin", async (ctx) => {
+  const userId = ctx.from.id;
+  const requiredChannels = await getRequiredChannels();
+  
+  if (requiredChannels.length > 0 && !AdminSet.has(userId)) {
+    const verifiedChatIds = await getUserVerifiedChannels(userId);
+    const verifiedSet = new Set(verifiedChatIds);
+    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+    
+    if (!allJoined) {
+      const folderLink = await getFolderLink();
+      if (folderLink) {
+        return ctx.reply("Join our channels first:\n\n" + folderLink);
+      }
+      let msg = "Join these channels first:\n\n";
+      for (const ch of requiredChannels) {
+        msg += "- " + ch.name + "\n";
+      }
+      return ctx.reply(msg);
+    }
+  }
+  
   await ctx.reply("Just type your message and it will be forwarded to admins.", {
     reply_markup: cancelKeyboard().reply_markup,
   });
@@ -458,25 +500,25 @@ bot.command("autoapprove", async (ctx) => {
   return ctx.reply(`⚡ *Auto-approve* is now _${!current ? "ON" : "OFF"}.`, { parse_mode: KB });
 });
 
-bot.command("ban", async (ctx) => {
-  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
-  await ctx.reply("🚫 _Send the user ID to ban._", {
-    parse_mode: KB,
-    reply_markup: cancelKeyboard().reply_markup,
-  });
-  const { setAdminState } = await import("./utils/redis.js");
-  await setAdminState(ctx.from.id, { action: "ban_user" });
-});
+// bot.command("ban", async (ctx) => {
+//   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+//   await ctx.reply("🚫 _Send the user ID to ban._", {
+//     parse_mode: KB,
+//     reply_markup: cancelKeyboard().reply_markup,
+//   });
+//   const { setAdminState } = await import("./utils/redis.js");
+//   await setAdminState(ctx.from.id, { action: "ban_user" });
+// });
 
-bot.command("unban", async (ctx) => {
-  if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
-  await ctx.reply("✅ _Send the user ID to unban._", {
-    parse_mode: KB,
-    reply_markup: cancelKeyboard().reply_markup,
-  });
-  const { setAdminState } = await import("./utils/redis.js");
-  await setAdminState(ctx.from.id, { action: "unban_user" });
-});
+// bot.command("unban", async (ctx) => {
+//   if (!AdminSet.has(ctx.from.id)) return ctx.reply("Admin only.");
+//   await ctx.reply("✅ _Send the user ID to unban._", {
+//     parse_mode: KB,
+//     reply_markup: cancelKeyboard().reply_markup,
+//   });
+//   const { setAdminState } = await import("./utils/redis.js");
+//   await setAdminState(ctx.from.id, { action: "unban_user" });
+// });
 
 // Setup feature handlers
 function setup(bot: any, AdminSet: Set<number>) {
