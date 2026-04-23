@@ -268,6 +268,68 @@ function setupAdminRelay(bot, adminSet) {
         msg += `🟢 Delivered: *${bc.delivered}*\n🔴 Failed: *${bc.failed}*\n📊 Total: *${bc.totalTargeted}*`;
         return ctx.reply(msg, { parse_mode: PM });
     });
+    bot.command("ban", async (ctx) => {
+        if (!ctx.from || !adminSet.has(ctx.from.id))
+            return;
+        let targetUserId;
+        const m = ctx.message;
+        if (m.reply_to_message?.message_id) {
+            const fwdUserId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, m.reply_to_message.message_id);
+            if (fwdUserId)
+                targetUserId = fwdUserId;
+            else {
+                const fwdFrom = m.reply_to_message.forward_from;
+                if (fwdFrom?.id)
+                    targetUserId = Number(fwdFrom.id);
+            }
+        }
+        if (m.reply_to_message?.from)
+            targetUserId = m.reply_to_message.from.id;
+        if (!targetUserId) {
+            const txt = ctx.message.text.slice("/ban".length).trim();
+            if (txt) {
+                const p = parseInt(txt, 10);
+                if (!isNaN(p))
+                    targetUserId = p;
+            }
+        }
+        if (!targetUserId)
+            return ctx.reply("Reply to a forwarded message or provide user ID.");
+        await (0, redis_js_1.banUser)(targetUserId);
+        await index_js_1.UserModel.updateOne({ tgId: targetUserId }, { $set: { isBanned: true } }, { upsert: true });
+        return ctx.reply(`User ${targetUserId} has been banned.`);
+    });
+    bot.command("unban", async (ctx) => {
+        if (!ctx.from || !adminSet.has(ctx.from.id))
+            return;
+        let targetUserId;
+        const m = ctx.message;
+        if (m.reply_to_message?.message_id) {
+            const fwdUserId = await (0, redis_js_1.getForwardedAdminUser)(ctx.chat.id, m.reply_to_message.message_id);
+            if (fwdUserId)
+                targetUserId = fwdUserId;
+            else {
+                const fwdFrom = m.reply_to_message.forward_from;
+                if (fwdFrom?.id)
+                    targetUserId = Number(fwdFrom.id);
+            }
+        }
+        if (m.reply_to_message?.from)
+            targetUserId = m.reply_to_message.from.id;
+        if (!targetUserId) {
+            const txt = ctx.message.text.slice("/unban".length).trim();
+            if (txt) {
+                const p = parseInt(txt, 10);
+                if (!isNaN(p))
+                    targetUserId = p;
+            }
+        }
+        if (!targetUserId)
+            return ctx.reply("Reply to a forwarded message or provide user ID.");
+        await (0, redis_js_1.unbanUser)(targetUserId);
+        await index_js_1.UserModel.updateOne({ tgId: targetUserId }, { $set: { isBanned: false } });
+        return ctx.reply(`User ${targetUserId} has been unbanned.`);
+    });
     async function handleAdminFlow(bot, ctx, state, adminSet) {
         const text = ctx.message.text || "";
         const uid = ctx.from.id;

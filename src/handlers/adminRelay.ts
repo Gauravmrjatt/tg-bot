@@ -314,6 +314,58 @@ const state = await getAdminState(ctx.from.id);
     return ctx.reply(msg, { parse_mode: PM });
   });
 
+  bot.command("ban", async (ctx) => {
+    if (!ctx.from || !adminSet.has(ctx.from.id)) return;
+    let targetUserId: number | undefined;
+    const m = ctx.message as any;
+
+    if (m.reply_to_message?.message_id) {
+      const fwdUserId = await getForwardedAdminUser(ctx.chat.id, m.reply_to_message.message_id);
+      if (fwdUserId) targetUserId = fwdUserId;
+      else {
+        const fwdFrom = (m.reply_to_message as any).forward_from;
+        if (fwdFrom?.id) targetUserId = Number(fwdFrom.id);
+      }
+    }
+
+    if (m.reply_to_message?.from) targetUserId = m.reply_to_message.from.id;
+    if (!targetUserId) {
+      const txt = (ctx as any).message.text.slice("/ban".length).trim();
+      if (txt) { const p = parseInt(txt, 10); if (!isNaN(p)) targetUserId = p; }
+    }
+    if (!targetUserId) return ctx.reply("Reply to a forwarded message or provide user ID.");
+
+    await banUser(targetUserId as number);
+    await UserModel.updateOne({ tgId: targetUserId }, { $set: { isBanned: true } }, { upsert: true });
+    return ctx.reply(`User ${targetUserId} has been banned.`);
+  });
+
+  bot.command("unban", async (ctx) => {
+    if (!ctx.from || !adminSet.has(ctx.from.id)) return;
+    let targetUserId: number | undefined;
+    const m = ctx.message as any;
+
+    if (m.reply_to_message?.message_id) {
+      const fwdUserId = await getForwardedAdminUser(ctx.chat.id, m.reply_to_message.message_id);
+      if (fwdUserId) targetUserId = fwdUserId;
+      else {
+        const fwdFrom = (m.reply_to_message as any).forward_from;
+        if (fwdFrom?.id) targetUserId = Number(fwdFrom.id);
+      }
+    }
+
+    if (m.reply_to_message?.from) targetUserId = m.reply_to_message.from.id;
+    if (!targetUserId) {
+      const txt = (ctx as any).message.text.slice("/unban".length).trim();
+      if (txt) { const p = parseInt(txt, 10); if (!isNaN(p)) targetUserId = p; }
+    }
+    if (!targetUserId) return ctx.reply("Reply to a forwarded message or provide user ID.");
+
+    await unbanUser(targetUserId as number);
+    await UserModel.updateOne({ tgId: targetUserId }, { $set: { isBanned: false } });
+    return ctx.reply(`User ${targetUserId} has been unbanned.`);
+  });
+
   async function handleAdminFlow(
     bot: Telegraf<Context>,
     ctx: Context,
