@@ -122,23 +122,20 @@ bot.start(async (ctx) => {
     const isAdmin = AdminSet.has(userId);
     const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
     const folderLink = await (0, settings_js_1.getFolderLink)();
-    if (!isAdmin && requiredChannels.length > 0) {
-        const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
-        const verifiedSet = new Set(verifiedChatIds);
-        const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
-        if (!allJoined) {
-            if (folderLink) {
-                return ctx.reply("Join our channels first:\n\n" + folderLink + "\n\nThen run /verify", {
-                    reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup,
-                });
-            }
-            let msg = "Join these channels first:\n\n";
-            for (const ch of requiredChannels) {
-                msg += "- " + ch.name + "\n";
-            }
-            msg += "\nThen run /verify";
-            return ctx.reply(msg, { reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup });
+    if (!isAdmin && (requiredChannels.length > 0 || folderLink)) {
+        const rows = [];
+        if (folderLink) {
+            rows.push([telegraf_1.Markup.button.url("Join Channels", folderLink)]);
         }
+        else if (requiredChannels.length > 0) {
+            for (const ch of requiredChannels) {
+                rows.push([telegraf_1.Markup.button.url("Join " + ch.name, ch.inviteLink)]);
+            }
+        }
+        rows.push([telegraf_1.Markup.button.callback("I Have Joined", "verify_channels")]);
+        return ctx.reply("Join our channels first, then click I Have Joined.", {
+            reply_markup: { inline_keyboard: rows },
+        });
     }
     const greeting = isAdmin
         ? "Hey admin, the bot is ready! Choose an option below:"
@@ -443,6 +440,43 @@ bot.action(/^banned_list:(\d+)$/, async (ctx) => {
     const page = parseInt(ctx.match[1], 10);
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
     await showBannedList(ctx, page);
+});
+bot.action("verify_channels", async (ctx) => {
+    const userId = ctx.callbackQuery.from.id;
+    if (AdminSet.has(userId))
+        return ctx.answerCbQuery("Admins bypass.");
+    const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+    const folderLink = await (0, settings_js_1.getFolderLink)();
+    if (requiredChannels.length === 0 && !folderLink) {
+        await ctx.answerCbQuery("No channels required.");
+        return ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    }
+    const missing = [];
+    for (const ch of requiredChannels) {
+        try {
+            const member = await bot.telegram.getChatMember(ch.chatId, userId);
+            if (member.status === "left" || member.status === "kicked") {
+                missing.push(ch.name);
+            }
+        }
+        catch {
+            missing.push(ch.name);
+        }
+    }
+    if (missing.length > 0) {
+        await ctx.answerCbQuery("You haven't joined all channels.");
+        let msg = "You haven't joined:\n" + missing.map(n => "- " + n).join("\n");
+        msg += "\n\nJoin and try again.";
+        await ctx.editMessageText(msg);
+    }
+    else {
+        const verifiedChatIds = requiredChannels.map(ch => ch.chatId);
+        await (0, redis_js_1.setUserVerifiedChannels)(userId, verifiedChatIds);
+        await ctx.answerCbQuery("Verified!");
+        await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
+        const greeting = (await (0, settings_js_1.getWelcomeMessage)()) || "Welcome to OSM Support. Send your loot screenshots here.";
+        await ctx.reply(greeting, { reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup });
+    }
 });
 bot.action("add_channel_flow", async (ctx) => {
     if (!AdminSet.has(ctx.callbackQuery.from.id))

@@ -97,24 +97,21 @@ bot.start(async (ctx) => {
   const requiredChannels = await getRequiredChannels();
   const folderLink = await getFolderLink();
   
-  if (!isAdmin && requiredChannels.length > 0) {
-    const verifiedChatIds = await getUserVerifiedChannels(userId);
-    const verifiedSet = new Set(verifiedChatIds);
-    const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
+  if (!isAdmin && (requiredChannels.length > 0 || folderLink)) {
+    const rows: any[][] = [];
     
-    if (!allJoined) {
-      if (folderLink) {
-        return ctx.reply("Join our channels first:\n\n" + folderLink + "\n\nThen run /verify", {
-          reply_markup: userMainKeyboard().reply_markup,
-        });
-      }
-      let msg = "Join these channels first:\n\n";
+    if (folderLink) {
+      rows.push([Markup.button.url("Join Channels", folderLink)]);
+    } else if (requiredChannels.length > 0) {
       for (const ch of requiredChannels) {
-        msg += "- " + ch.name + "\n";
+        rows.push([Markup.button.url("Join " + ch.name, ch.inviteLink)]);
       }
-      msg += "\nThen run /verify";
-      return ctx.reply(msg, { reply_markup: userMainKeyboard().reply_markup });
     }
+    rows.push([Markup.button.callback("I Have Joined", "verify_channels")]);
+    
+    return ctx.reply("Join our channels first, then click I Have Joined.", {
+      reply_markup: { inline_keyboard: rows },
+    });
   }
   
   const greeting = isAdmin
@@ -431,6 +428,45 @@ bot.action(/^banned_list:(\d+)$/, async (ctx) => {
   const page = parseInt(ctx.match[1], 10);
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
   await showBannedList(ctx, page);
+});
+
+bot.action("verify_channels", async (ctx) => {
+  const userId = ctx.callbackQuery.from.id;
+  if (AdminSet.has(userId)) return ctx.answerCbQuery("Admins bypass.");
+  
+  const requiredChannels = await getRequiredChannels();
+  const folderLink = await getFolderLink();
+  
+  if (requiredChannels.length === 0 && !folderLink) {
+    await ctx.answerCbQuery("No channels required.");
+    return ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  }
+  
+  const missing: string[] = [];
+  for (const ch of requiredChannels) {
+    try {
+      const member = await bot.telegram.getChatMember(ch.chatId, userId);
+      if (member.status === "left" || member.status === "kicked") {
+        missing.push(ch.name);
+      }
+    } catch {
+      missing.push(ch.name);
+    }
+  }
+  
+  if (missing.length > 0) {
+    await ctx.answerCbQuery("You haven't joined all channels.");
+    let msg = "You haven't joined:\n" + missing.map(n => "- " + n).join("\n");
+    msg += "\n\nJoin and try again.";
+    await ctx.editMessageText(msg);
+  } else {
+    const verifiedChatIds = requiredChannels.map(ch => ch.chatId);
+    await setUserVerifiedChannels(userId, verifiedChatIds);
+    await ctx.answerCbQuery("Verified!");
+    await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
+    const greeting = (await getWelcomeMessage()) || "Welcome to OSM Support. Send your loot screenshots here.";
+    await ctx.reply(greeting, { reply_markup: userMainKeyboard().reply_markup });
+  }
 });
 
 bot.action("add_channel_flow", async (ctx) => {
