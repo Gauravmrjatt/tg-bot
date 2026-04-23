@@ -104,12 +104,7 @@ bot.start(async (ctx) => {
 bot.hears("📁 Join Channels", async (ctx) => {
   const folderLink = await getFolderLink();
   if (folderLink) {
-    return ctx.reply("All Yaari Channels in One Folder\n\n" +
-      "Loot Deals\nHidden Bugs\nSmart Tricks\nBest Offers\nHigh Payout Campaigns\n" +
-      "Fastest Updates\nOnly Real Deals\nNo Fake, No Time Waste\n\n" +
-      "Bas Add Folder pe click karo aur sab channels ek sath join karo\n\n" +
-      "Folder Link: " + folderLink + "\n\n" +
-      "Jo already join kar chuke hain wo daily fayda le rahe hain\nLate aaye to loss pakka");
+    return ctx.reply(folderLink);
   }
   return ctx.reply("No folder link set by admin.");
 });
