@@ -443,15 +443,17 @@ bot.action("verify_channels", async (ctx) => {
     }
     const missing = [];
     for (const ch of requiredChannels) {
+        let isMember = false;
         try {
             const member = await bot.telegram.getChatMember(ch.chatId, userId);
-            if (member.status === "left" || member.status === "kicked") {
-                missing.push(ch.name);
-            }
+            isMember = member.status !== "left" && member.status !== "kicked";
         }
-        catch {
+        catch (e) {
+            // Bot not admin - can't verify, assume not joined
+            console.log("Cannot verify user - bot not admin in channel:", ch.chatId);
+        }
+        if (!isMember)
             missing.push(ch.name);
-        }
     }
     if (missing.length > 0) {
         await ctx.answerCbQuery("Join all channels first!");
