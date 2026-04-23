@@ -121,20 +121,23 @@ bot.start(async (ctx) => {
     const userId = ctx.from.id;
     const isAdmin = AdminSet.has(userId);
     const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+    const folderLink = await (0, settings_js_1.getFolderLink)();
     if (!isAdmin && requiredChannels.length > 0) {
         const verifiedChatIds = await (0, redis_js_1.getUserVerifiedChannels)(userId);
         const verifiedSet = new Set(verifiedChatIds);
         const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
         if (!allJoined) {
-            const folderLink = await (0, settings_js_1.getFolderLink)();
             if (folderLink) {
-                return ctx.reply("Join our channels first:\n\n" + folderLink);
+                return ctx.reply("Join our channels first:\n\n" + folderLink + "\n\nThen run /verify", {
+                    reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup,
+                });
             }
             let msg = "Join these channels first:\n\n";
             for (const ch of requiredChannels) {
                 msg += "- " + ch.name + "\n";
             }
-            return ctx.reply(msg);
+            msg += "\nThen run /verify";
+            return ctx.reply(msg, { reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup });
         }
     }
     const greeting = isAdmin
@@ -142,6 +145,40 @@ bot.start(async (ctx) => {
         : (await (0, settings_js_1.getWelcomeMessage)()) || "Welcome to OSM Support. Send your loot screenshots here.";
     const kb = isAdmin ? (0, format_js_1.adminMainKeyboard)() : (0, format_js_1.userMainKeyboard)();
     return ctx.reply(greeting, { reply_markup: kb.reply_markup });
+});
+// --- Verify command ---
+bot.command("verify", async (ctx) => {
+    const userId = ctx.from.id;
+    if (AdminSet.has(userId))
+        return;
+    const requiredChannels = await (0, redis_js_1.getRequiredChannels)();
+    if (requiredChannels.length === 0) {
+        return ctx.reply("No channels required.");
+    }
+    const missing = [];
+    for (const ch of requiredChannels) {
+        try {
+            const member = await bot.telegram.getChatMember(ch.chatId, userId);
+            if (member.status === "left" || member.status === "kicked") {
+                missing.push(ch.name);
+            }
+        }
+        catch {
+            missing.push(ch.name);
+        }
+    }
+    if (missing.length > 0) {
+        const folderLink = await (0, settings_js_1.getFolderLink)();
+        if (folderLink) {
+            return ctx.reply("You haven't joined:\n" + missing.map(n => "- " + n).join("\n") + "\n\nJoin here:\n" + folderLink);
+        }
+        return ctx.reply("You haven't joined:\n" + missing.map(n => "- " + n).join("\n"));
+    }
+    const verifiedChatIds = requiredChannels.map(ch => ch.chatId);
+    await (0, redis_js_1.setUserVerifiedChannels)(userId, verifiedChatIds);
+    return ctx.reply("Verified! You can now message admin.", {
+        reply_markup: (0, format_js_1.userMainKeyboard)().reply_markup,
+    });
 });
 // --- User buttons ---
 bot.hears("📁 Join Channels", async (ctx) => {

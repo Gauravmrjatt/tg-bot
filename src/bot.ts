@@ -95,6 +95,7 @@ bot.start(async (ctx) => {
   const userId = ctx.from.id;
   const isAdmin = AdminSet.has(userId);
   const requiredChannels = await getRequiredChannels();
+  const folderLink = await getFolderLink();
   
   if (!isAdmin && requiredChannels.length > 0) {
     const verifiedChatIds = await getUserVerifiedChannels(userId);
@@ -102,15 +103,17 @@ bot.start(async (ctx) => {
     const allJoined = requiredChannels.every(ch => verifiedSet.has(ch.chatId));
     
     if (!allJoined) {
-      const folderLink = await getFolderLink();
       if (folderLink) {
-        return ctx.reply("Join our channels first:\n\n" + folderLink);
+        return ctx.reply("Join our channels first:\n\n" + folderLink + "\n\nThen run /verify", {
+          reply_markup: userMainKeyboard().reply_markup,
+        });
       }
       let msg = "Join these channels first:\n\n";
       for (const ch of requiredChannels) {
         msg += "- " + ch.name + "\n";
       }
-      return ctx.reply(msg);
+      msg += "\nThen run /verify";
+      return ctx.reply(msg, { reply_markup: userMainKeyboard().reply_markup });
     }
   }
   
@@ -119,6 +122,43 @@ bot.start(async (ctx) => {
     : (await getWelcomeMessage()) || "Welcome to OSM Support. Send your loot screenshots here.";
   const kb = isAdmin ? adminMainKeyboard() : userMainKeyboard();
   return ctx.reply(greeting, { reply_markup: kb.reply_markup });
+});
+
+// --- Verify command ---
+bot.command("verify", async (ctx) => {
+  const userId = ctx.from.id;
+  if (AdminSet.has(userId)) return;
+  
+  const requiredChannels = await getRequiredChannels();
+  if (requiredChannels.length === 0) {
+    return ctx.reply("No channels required.");
+  }
+  
+  const missing: string[] = [];
+  for (const ch of requiredChannels) {
+    try {
+      const member = await bot.telegram.getChatMember(ch.chatId, userId);
+      if (member.status === "left" || member.status === "kicked") {
+        missing.push(ch.name);
+      }
+    } catch {
+      missing.push(ch.name);
+    }
+  }
+  
+  if (missing.length > 0) {
+    const folderLink = await getFolderLink();
+    if (folderLink) {
+      return ctx.reply("You haven't joined:\n" + missing.map(n => "- " + n).join("\n") + "\n\nJoin here:\n" + folderLink);
+    }
+    return ctx.reply("You haven't joined:\n" + missing.map(n => "- " + n).join("\n"));
+  }
+  
+  const verifiedChatIds = requiredChannels.map(ch => ch.chatId);
+  await setUserVerifiedChannels(userId, verifiedChatIds);
+  return ctx.reply("Verified! You can now message admin.", {
+    reply_markup: userMainKeyboard().reply_markup,
+  });
 });
 
 // --- User buttons ---
